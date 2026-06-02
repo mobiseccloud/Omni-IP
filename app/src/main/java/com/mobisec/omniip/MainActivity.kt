@@ -24,6 +24,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
+
+import androidx.compose.foundation.clickable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import com.mobisec.omniip.db.Action
+import com.mobisec.omniip.db.TargetType
 import com.mobisec.omniip.model.ConnectionDirection
 import com.mobisec.omniip.model.ConnectionTelemetry
 import com.mobisec.omniip.ui.theme.AlertRed
@@ -32,6 +40,9 @@ import com.mobisec.omniip.ui.theme.OmniIPTheme
 import com.mobisec.omniip.ui.theme.TacticalAmber
 import com.mobisec.omniip.ui.theme.TextSecondary
 import com.mobisec.omniip.viewmodel.TelemetryViewModel
+
+import com.mobisec.omniip.viewmodel.RulesViewModel
+import com.mobisec.omniip.ui.RulesScreen
 import com.mobisec.omniip.vpn.OmniVpnService
 
 class MainActivity : ComponentActivity() {
@@ -45,6 +56,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private val rulesViewModel: RulesViewModel by viewModels()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -53,7 +66,8 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    val connections by viewModel.connections.collectAsState()
+                    var currentTab by remember { mutableStateOf(0) }
+                    val mainTabs = listOf("Telemetry", "Firewall Matrix")
 
                     Column(modifier = Modifier.fillMaxSize()) {
                         TopBar(
@@ -61,22 +75,64 @@ class MainActivity : ComponentActivity() {
                             onStopVpn = { stopVpn() }
                         )
 
-                        HorizontalDivider(color = MatrixGreen, thickness = 1.dp)
-
-                        LazyColumn(
-                            modifier = Modifier.fillMaxSize(),
-                            contentPadding = PaddingValues(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        TabRow(
+                            selectedTabIndex = currentTab,
+                            containerColor = MaterialTheme.colorScheme.background,
+                            contentColor = MatrixGreen
                         ) {
-                            items(connections) { telemetry ->
-                                TelemetryItem(telemetry)
+                            mainTabs.forEachIndexed { index, title ->
+                                Tab(
+                                    selected = currentTab == index,
+                                    onClick = { currentTab = index },
+                                    text = { Text(title) }
+                                )
                             }
+                        }
+
+                        if (currentTab == 0) {
+                            TelemetryScreen(viewModel)
+                        } else {
+                            RulesScreen(rulesViewModel)
                         }
                     }
                 }
             }
         }
     }
+
+    @Composable
+    fun TelemetryScreen(viewModel: TelemetryViewModel) {
+        val connections by viewModel.connections.collectAsState()
+        var selectedTelemetry by remember { mutableStateOf<ConnectionTelemetry?>(null) }
+        var showBottomSheet by remember { mutableStateOf(false) }
+
+        Column(modifier = Modifier.fillMaxSize()) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(connections) { telemetry ->
+                    TelemetryItem(telemetry) {
+                        selectedTelemetry = telemetry
+                        showBottomSheet = true
+                    }
+                }
+            }
+        }
+
+        if (showBottomSheet && selectedTelemetry != null) {
+            ActionBottomSheet(
+                telemetry = selectedTelemetry!!,
+                onDismiss = { showBottomSheet = false },
+                onAction = { targetType, targetValue, action ->
+                    viewModel.addRule(targetType, targetValue, action)
+                    showBottomSheet = false
+                }
+            )
+        }
+    }
+
 
     private fun startVpn() {
         val intent = VpnService.prepare(this)
@@ -129,13 +185,25 @@ fun TopBar(onStartVpn: () -> Unit, onStopVpn: () -> Unit) {
 val HighRiskJurisdictions = listOf("CN", "RU", "IR", "KP")
 
 @Composable
-fun TelemetryItem(telemetry: ConnectionTelemetry) {
+fun TelemetryItem(telemetry: ConnectionTelemetry, onClick: () -> Unit = {}) {
     val isHighRisk = HighRiskJurisdictions.contains(telemetry.countryCode)
 
-    val cardColor = if (isHighRisk) AlertRed.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surface
+    val baseCardColor = if (isHighRisk) AlertRed.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surface
+    val cardColor = when {
+        telemetry.isBlocked -> AlertRed.copy(alpha = 0.4f)
+        telemetry.isFlagged -> AlertRed.copy(alpha = 0.3f)
+        telemetry.isIgnored -> MatrixGreen.copy(alpha = 0.2f)
+        else -> baseCardColor
+    }
+
+    val finalTextColor = when {
+        telemetry.isBlocked || telemetry.isFlagged || isHighRisk -> AlertRed
+        telemetry.isIgnored -> MatrixGreen
+        else -> MatrixGreen
+    }
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable { onClick() },
         colors = CardDefaults.cardColors(containerColor = cardColor)
     ) {
         Row(
@@ -188,7 +256,7 @@ fun TelemetryItem(telemetry: ConnectionTelemetry) {
 
                     Text(
                         text = ipDisplay,
-                        color = if (isHighRisk) AlertRed else MatrixGreen,
+                        color = finalTextColor,
                         fontSize = 12.sp
                     )
                 }
@@ -207,6 +275,66 @@ fun TelemetryItem(telemetry: ConnectionTelemetry) {
                     )
                 }
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ActionBottomSheet(
+    telemetry: ConnectionTelemetry,
+    onDismiss: () -> Unit,
+    onAction: (TargetType, String, Action) -> Unit
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(text = "Tactical Actions", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = MaterialTheme.colorScheme.onSurface)
+
+            HorizontalDivider(color = TextSecondary, thickness = 1.dp)
+
+            if (telemetry.uid != -1) {
+                Button(
+                    onClick = { onAction(TargetType.APPLICATION, telemetry.uid.toString(), Action.BLOCK) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = AlertRed)
+                ) {
+                    Text("Block Application (UID: ${telemetry.uid})")
+                }
+            }
+
+            val targetValue = telemetry.resolvedHostname ?: telemetry.destIp
+            val targetType = if (telemetry.resolvedHostname != null) TargetType.DOMAIN else TargetType.IP_ADDRESS
+
+            Button(
+                onClick = { onAction(targetType, targetValue, Action.BLOCK) },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = AlertRed)
+            ) {
+                Text("Block ${if (targetType == TargetType.DOMAIN) "Domain" else "IP"}: $targetValue")
+            }
+
+            Button(
+                onClick = { onAction(targetType, targetValue, Action.FLAG) },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = TacticalAmber)
+            ) {
+                Text("Flag Connection")
+            }
+
+            Button(
+                onClick = { onAction(targetType, targetValue, Action.IGNORE) },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(containerColor = MatrixGreen)
+            ) {
+                Text("Add to Ignore List")
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }

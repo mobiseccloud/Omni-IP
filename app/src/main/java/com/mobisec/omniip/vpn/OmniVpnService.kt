@@ -7,6 +7,10 @@ import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.util.Log
+
+import com.mobisec.omniip.db.AppDatabase
+import com.mobisec.omniip.db.Action
+import com.mobisec.omniip.db.TargetType
 import com.maxmind.geoip2.DatabaseReader
 import com.mobisec.omniip.model.ConnectionDirection
 import com.mobisec.omniip.model.ConnectionTelemetry
@@ -35,6 +39,7 @@ class OmniVpnService : VpnService() {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private val dnsCache = ConcurrentHashMap<String, String>() // IP -> Hostname
+    private val ruleCache = ConcurrentHashMap<String, Action>()
 
     private var cityDbReader: DatabaseReader? = null
     private var asnDbReader: DatabaseReader? = null
@@ -62,10 +67,18 @@ class OmniVpnService : VpnService() {
                 initGeoIp()
                 startInterception(it)
             }
-        } ?: run {
-            Log.e(TAG, "Failed to establish VPN interface")
-            stopSelf()
         }
+
+                scope.launch(Dispatchers.IO) {
+            AppDatabase.getDatabase(this@OmniVpnService).firewallRuleDao().getAllRules().collect { rules ->
+                ruleCache.clear()
+                for (rule in rules) {
+                    val key = "${rule.targetType.name}:${rule.targetValue}"
+                    ruleCache[key] = rule.action
+                }
+            }
+        }
+
 
         return START_STICKY
     }
@@ -142,7 +155,7 @@ class OmniVpnService : VpnService() {
             if (destPort == 53) {
                 handleDnsRequest(packet, length, ihl, sourceIp, destIp, sourcePort, outputStream)
             } else {
-                handleGenericPacket(protocol, sourceIp, destIp, sourcePort, destPort, null)
+                handleGenericPacket(protocol, sourceIp, destIp, sourcePort, destPort, null, packet, length, outputStream)
             }
         } else if (protocol == 6) { // TCP
             val sourcePort = PacketUtils.getSourcePort(packet, ihl)
@@ -157,11 +170,11 @@ class OmniVpnService : VpnService() {
                 }
             }
 
-            handleGenericPacket(protocol, sourceIp, destIp, sourcePort, destPort, direction)
+            handleGenericPacket(protocol, sourceIp, destIp, sourcePort, destPort, direction, packet, length, outputStream)
         }
     }
 
-    private suspend fun handleGenericPacket(protocol: Int, sourceIp: InetAddress, destIp: InetAddress, sourcePort: Int, destPort: Int, direction: String?) {
+    private suspend fun handleGenericPacket(protocol: Int, sourceIp: InetAddress, destIp: InetAddress, sourcePort: Int, destPort: Int, direction: String?, packet: ByteBuffer, length: Int, outputStream: FileOutputStream) {
         val uid = resolveUid(protocol, sourceIp, sourcePort, destIp, destPort)
         if (uid != -1) {
             val appInfo = getAppInfo(uid)
@@ -195,23 +208,63 @@ class OmniVpnService : VpnService() {
                 // Ignore exceptions (e.g., AddressNotFoundException)
             }
 
+val targetIpString = targetIp.hostAddress ?: ""
+            var finalAction = Action.IGNORE // default allow if not in DB, mapped to ignore/allow
+            var ruleApplied = false
+
+            // Check UID rule
+            val uidKey = "${TargetType.APPLICATION.name}:$uid"
+            if (ruleCache.containsKey(uidKey)) {
+                finalAction = ruleCache[uidKey]!!
+                ruleApplied = true
+            }
+
+            // Check IP rule (overrides UID if more specific? let's say IP/Domain overrides UID)
+            val ipKey = "${TargetType.IP_ADDRESS.name}:$targetIpString"
+            if (ruleCache.containsKey(ipKey)) {
+                finalAction = ruleCache[ipKey]!!
+                ruleApplied = true
+            }
+
+            // Check Domain rule
+            if (hostname != null) {
+                val domainKey = "${TargetType.DOMAIN.name}:$hostname"
+                if (ruleCache.containsKey(domainKey)) {
+                    finalAction = ruleCache[domainKey]!!
+                    ruleApplied = true
+                }
+            }
+
             val telemetry = ConnectionTelemetry(
                 appName = appInfo.first,
                 packageName = appInfo.second,
                 appIcon = appInfo.third,
                 protocol = if (protocol == 6) "TCP" else "UDP",
                 destPort = destPort,
-                destIp = targetIp.hostAddress ?: "",
+                destIp = targetIpString,
                 resolvedHostname = hostname,
                 country = countryName,
                 countryCode = countryIsoCode,
                 city = cityName,
                 asn = asnName,
-                direction = direction
+                direction = direction,
+                uid = uid,
+                isBlocked = if (ruleApplied && finalAction == Action.BLOCK) true else false,
+                isFlagged = if (ruleApplied && finalAction == Action.FLAG) true else false,
+                isIgnored = if (ruleApplied && finalAction == Action.IGNORE) true else false
             )
             _telemetryFlow.tryEmit(telemetry)
+
+            if (ruleApplied && finalAction == Action.BLOCK) {
+                // Drop packet entirely
+                return
+            }
         }
-        // Packets are dropped (sinkholed) simply by not writing them back to outputStream
+// If not dropped by firewall
+        val packetData = ByteArray(length)
+        packet.position(0)
+        packet.get(packetData)
+        outputStream.write(packetData)
     }
 
     private fun resolveUid(protocol: Int, sourceIp: InetAddress, sourcePort: Int, destIp: InetAddress, destPort: Int): Int {
