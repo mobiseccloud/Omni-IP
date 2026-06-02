@@ -44,6 +44,13 @@ import com.mobisec.omniip.viewmodel.TelemetryViewModel
 import com.mobisec.omniip.viewmodel.RulesViewModel
 import com.mobisec.omniip.ui.RulesScreen
 import com.mobisec.omniip.vpn.OmniVpnService
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.Constraints
+import androidx.work.NetworkType
+import androidx.work.ExistingPeriodicWorkPolicy
+import java.util.concurrent.TimeUnit
+import com.mobisec.omniip.worker.ThreatFeedWorker
 
 class MainActivity : ComponentActivity() {
 
@@ -60,6 +67,22 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Schedule Threat Feed Worker
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.UNMETERED)
+            .build()
+
+        val updateRequest = PeriodicWorkRequestBuilder<ThreatFeedWorker>(24, TimeUnit.HOURS)
+            .setConstraints(constraints)
+            .build()
+
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            "ThreatFeedUpdate",
+            ExistingPeriodicWorkPolicy.KEEP,
+            updateRequest
+        )
+
         setContent {
             OmniIPTheme {
                 Surface(
@@ -67,7 +90,7 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     var currentTab by remember { mutableStateOf(0) }
-                    val mainTabs = listOf("Telemetry", "Firewall Matrix")
+                    val mainTabs = listOf("Telemetry", "Firewall Matrix", "Threat Feeds")
 
                     Column(modifier = Modifier.fillMaxSize()) {
                         TopBar(
@@ -91,8 +114,10 @@ class MainActivity : ComponentActivity() {
 
                         if (currentTab == 0) {
                             TelemetryScreen(viewModel)
-                        } else {
+                        } else if (currentTab == 1) {
                             RulesScreen(rulesViewModel)
+                        } else {
+                            com.mobisec.omniip.ui.SettingsScreen()
                         }
                     }
                 }
