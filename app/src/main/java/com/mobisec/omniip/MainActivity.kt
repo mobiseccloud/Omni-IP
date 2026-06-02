@@ -43,6 +43,11 @@ import com.mobisec.omniip.viewmodel.TelemetryViewModel
 
 import com.mobisec.omniip.viewmodel.RulesViewModel
 import com.mobisec.omniip.ui.RulesScreen
+import com.mobisec.omniip.ui.LanScannerScreen
+import com.mobisec.omniip.ui.DashboardScreen
+import com.mobisec.omniip.viewmodel.LanScannerViewModel
+import com.mobisec.omniip.viewmodel.DashboardViewModel
+
 import com.mobisec.omniip.vpn.OmniVpnService
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
@@ -64,6 +69,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private val rulesViewModel: RulesViewModel by viewModels()
+        val lanScannerViewModel: LanScannerViewModel by viewModels()
+        val dashboardViewModel: DashboardViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -90,7 +97,9 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     var currentTab by remember { mutableStateOf(0) }
-                    val mainTabs = listOf("Telemetry", "Firewall Matrix", "Threat Feeds")
+                    var targetIp by remember { mutableStateOf("") }
+                    var initialAction by remember { mutableStateOf("NONE") }
+                    val mainTabs = listOf("Telemetry", "Firewall Matrix", "Threat Feeds", "Scanner", "Dashboard")
 
                     Column(modifier = Modifier.fillMaxSize()) {
                         TopBar(
@@ -116,8 +125,39 @@ class MainActivity : ComponentActivity() {
                             TelemetryScreen(viewModel)
                         } else if (currentTab == 1) {
                             RulesScreen(rulesViewModel)
-                        } else {
+                        } else if (currentTab == 2) {
                             com.mobisec.omniip.ui.SettingsScreen()
+                        } else if (currentTab == 3) {
+                            LanScannerScreen(lanScannerViewModel) { ip, action ->
+                                targetIp = ip
+                                initialAction = action
+                                currentTab = 4 // Navigate to Dashboard
+                            }
+                        } else {
+                            val terminalOutput by dashboardViewModel.terminalOutput.collectAsState()
+                            val isExecuting by dashboardViewModel.isExecuting.collectAsState()
+                            val showUpgradePrompt by dashboardViewModel.showUpgradePrompt.collectAsState()
+
+                            if (showUpgradePrompt) {
+                                AlertDialog(
+                                    onDismissRequest = { dashboardViewModel.dismissUpgradePrompt() },
+                                    title = { Text("Premium Feature Locked") },
+                                    text = { Text("Deep scanning with Nmap (-p- -A) requires a premium entitlement. Upgrade now to unlock advanced tactical capabilities.") },
+                                    confirmButton = {
+                                        Button(onClick = { dashboardViewModel.dismissUpgradePrompt() }) {
+                                            Text("OK")
+                                        }
+                                    }
+                                )
+                            }
+
+                            DashboardScreen(
+                                targetIp = targetIp,
+                                initialAction = initialAction,
+                                terminalOutput = terminalOutput,
+                                isExecuting = isExecuting,
+                                onExecuteAction = { ip, action -> dashboardViewModel.executeAction(ip, action) }
+                            )
                         }
                     }
                 }
