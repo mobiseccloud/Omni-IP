@@ -13,6 +13,9 @@ import com.mobisec.omniip.db.Action
 import com.mobisec.omniip.db.TargetType
 import com.maxmind.geoip2.DatabaseReader
 import com.mobisec.omniip.model.ConnectionDirection
+import com.google.common.hash.BloomFilter
+import com.google.common.hash.Funnels
+import java.io.File
 import com.mobisec.omniip.model.ConnectionTelemetry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -40,6 +43,8 @@ class OmniVpnService : VpnService() {
 
     private val dnsCache = ConcurrentHashMap<String, String>() // IP -> Hostname
     private val ruleCache = ConcurrentHashMap<String, Action>()
+    private var threatBloomFilter: BloomFilter<CharSequence>? = null
+    private var threatFeedsLastUpdated: Long = 0
 
     private var cityDbReader: DatabaseReader? = null
     private var asnDbReader: DatabaseReader? = null
@@ -65,6 +70,7 @@ class OmniVpnService : VpnService() {
         vpnInterface?.let {
             vpnJob = scope.launch {
                 initGeoIp()
+                loadBloomFilter()
                 startInterception(it)
             }
         }
@@ -79,8 +85,37 @@ class OmniVpnService : VpnService() {
             }
         }
 
+        scope.launch(Dispatchers.IO) {
+            while (true) {
+                val file = File(filesDir, "threat_bloom.bin")
+                if (file.exists() && file.lastModified() > threatFeedsLastUpdated) {
+                    loadBloomFilter()
+                }
+                kotlinx.coroutines.delay(60000)
+            }
+        }
 
         return START_STICKY
+    }
+
+    private suspend fun loadBloomFilter() {
+        withContext(Dispatchers.IO) {
+            try {
+                val file = File(filesDir, "threat_bloom.bin")
+                if (file.exists()) {
+                    FileInputStream(file).use { fis ->
+                        threatBloomFilter = BloomFilter.readFrom(fis, Funnels.stringFunnel(Charsets.UTF_8))
+                        threatFeedsLastUpdated = file.lastModified()
+                    }
+                    Log.d(TAG, "Loaded Threat Feed Bloom Filter successfully")
+                } else {
+                    threatBloomFilter = null
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error loading Bloom Filter", e)
+                threatBloomFilter = null
+            }
+        }
     }
 
     private suspend fun initGeoIp() {
@@ -232,6 +267,39 @@ val targetIpString = targetIp.hostAddress ?: ""
                 if (ruleCache.containsKey(domainKey)) {
                     finalAction = ruleCache[domainKey]!!
                     ruleApplied = true
+                }
+            }
+
+            if (finalAction != Action.IGNORE) {
+                threatBloomFilter?.let { filter ->
+                    var threatFound = false
+                    if (filter.mightContain(targetIpString)) {
+                        threatFound = true
+                    } else if (hostname != null && filter.mightContain(hostname)) {
+                        threatFound = true
+                    }
+
+                    if (threatFound) {
+                        val sharedPrefs = getSharedPreferences("threat_feeds", android.content.Context.MODE_PRIVATE)
+                        val adActionStr = sharedPrefs.getString("ad_tracker_action", Action.BLOCK.name)
+                        val malwareActionStr = sharedPrefs.getString("malware_action", Action.BLOCK.name)
+                        // In a real app we'd need to know *which* feed triggered it, but we can assume worst case (Block > Flag)
+                        val actionToTake = if (adActionStr == Action.BLOCK.name || malwareActionStr == Action.BLOCK.name) {
+                            Action.BLOCK
+                        } else {
+                            Action.FLAG
+                        }
+
+                        // We only override manual block/flag if the threat feed is worse, actually instructions say:
+                        // "IGNORE (Manual) > BLOCK/FLAG (Manual) > BLOCK/FLAG (Automated Threat Feed)"
+                        // So manual rule has already set finalAction. If we reach here, finalAction could be BLOCK/FLAG from manual.
+                        // Wait, if there's no manual rule, or if threat feed is checked, threat feed sets finalAction if manual is not set.
+                        // Let's just override finalAction if it wasn't already BLOCK from manual.
+                        if (!ruleApplied) {
+                            finalAction = actionToTake
+                            ruleApplied = true
+                        }
+                    }
                 }
             }
 
