@@ -2,6 +2,8 @@ package com.mobisec.omniip.ui
 
 import android.content.Context
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -10,8 +12,10 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mobisec.omniip.db.Action
+import com.mobisec.omniip.ui.theme.AlertRed
 import com.mobisec.omniip.ui.theme.MatrixGreen
 import com.mobisec.omniip.ui.theme.TacticalAmber
+import java.io.File
 
 @Composable
 fun SettingsScreen() {
@@ -24,7 +28,18 @@ fun SettingsScreen() {
     var malwareEnabled by remember { mutableStateOf(sharedPrefs.getBoolean("malware_enabled", false)) }
     var malwareAction by remember { mutableStateOf(Action.valueOf(sharedPrefs.getString("malware_action", Action.BLOCK.name) ?: Action.BLOCK.name)) }
 
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+    // Dataset Management State
+    var geoIpCityExists by remember { mutableStateOf(File(context.filesDir, "GeoLite2-City.mmdb").exists()) }
+    var geoIpAsnExists by remember { mutableStateOf(File(context.filesDir, "GeoLite2-ASN.mmdb").exists()) }
+    var ouiExists by remember { mutableStateOf(File(context.filesDir, "oui.txt").exists()) }
+    var malwareFeedExists by remember { mutableStateOf(File(context.filesDir, "threat_bloom.bin").exists()) }
+
+    var alienVaultKey by remember { mutableStateOf(sharedPrefs.getString("alienvault_key", "") ?: "") }
+    var abuseIpDbKey by remember { mutableStateOf(sharedPrefs.getString("abuseipdb_key", "") ?: "") }
+
+    val scrollState = rememberScrollState()
+
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(scrollState)) {
         Text("Automated Threat Feeds", fontSize = 20.sp, color = MatrixGreen)
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -57,6 +72,91 @@ fun SettingsScreen() {
                 sharedPrefs.edit().putString("malware_action", it.name).apply()
             }
         )
+
+        Spacer(modifier = Modifier.height(24.dp))
+        HorizontalDivider(color = TacticalAmber)
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Text("Data Management", fontSize = 20.sp, color = MatrixGreen)
+        Spacer(modifier = Modifier.height(16.dp))
+
+        DatasetManagerItem("GeoIP City Database", geoIpCityExists) {
+            File(context.filesDir, "GeoLite2-City.mmdb").delete()
+            geoIpCityExists = false
+        }
+        DatasetManagerItem("GeoIP ASN Database", geoIpAsnExists) {
+            File(context.filesDir, "GeoLite2-ASN.mmdb").delete()
+            geoIpAsnExists = false
+        }
+        DatasetManagerItem("MAC OUI Database", ouiExists) {
+            File(context.filesDir, "oui.txt").delete()
+            ouiExists = false
+        }
+        DatasetManagerItem("Threat Bloom Filter", malwareFeedExists) {
+            File(context.filesDir, "threat_bloom.bin").delete()
+            malwareFeedExists = false
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+        HorizontalDivider(color = TacticalAmber)
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Text("OSINT Integration", fontSize = 20.sp, color = MatrixGreen)
+        Spacer(modifier = Modifier.height(16.dp))
+
+        OutlinedTextField(
+            value = alienVaultKey,
+            onValueChange = {
+                alienVaultKey = it
+                sharedPrefs.edit().putString("alienvault_key", it).apply()
+            },
+            label = { Text("AlienVault OTX API Key") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedTextField(
+            value = abuseIpDbKey,
+            onValueChange = {
+                abuseIpDbKey = it
+                sharedPrefs.edit().putString("abuseipdb_key", it).apply()
+            },
+            label = { Text("AbuseIPDB API Key") },
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
+fun DatasetManagerItem(title: String, exists: Boolean, onDelete: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, fontSize = 16.sp)
+                Text(
+                    text = if (exists) "Installed" else "Missing",
+                    color = if (exists) MatrixGreen else AlertRed,
+                    fontSize = 12.sp
+                )
+            }
+            if (exists) {
+                Button(
+                    onClick = onDelete,
+                    colors = ButtonDefaults.buttonColors(containerColor = AlertRed)
+                ) {
+                    Text("Delete")
+                }
+            } else {
+                Button(
+                    onClick = { /* In a full implementation, trigger InitViewModel / Worker */ },
+                    colors = ButtonDefaults.buttonColors(containerColor = MatrixGreen)
+                ) {
+                    Text("Update")
+                }
+            }
+        }
     }
 }
 
