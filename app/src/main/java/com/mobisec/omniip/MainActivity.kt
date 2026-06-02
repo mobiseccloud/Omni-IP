@@ -24,7 +24,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
+import com.mobisec.omniip.model.ConnectionDirection
 import com.mobisec.omniip.model.ConnectionTelemetry
+import com.mobisec.omniip.ui.theme.AlertRed
 import com.mobisec.omniip.ui.theme.MatrixGreen
 import com.mobisec.omniip.ui.theme.OmniIPTheme
 import com.mobisec.omniip.ui.theme.TacticalAmber
@@ -124,11 +126,17 @@ fun TopBar(onStartVpn: () -> Unit, onStopVpn: () -> Unit) {
     }
 }
 
+val HighRiskJurisdictions = listOf("CN", "RU", "IR", "KP")
+
 @Composable
 fun TelemetryItem(telemetry: ConnectionTelemetry) {
+    val isHighRisk = HighRiskJurisdictions.contains(telemetry.countryCode)
+
+    val cardColor = if (isHighRisk) AlertRed.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surface
+
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+        colors = CardDefaults.cardColors(containerColor = cardColor)
     ) {
         Row(
             modifier = Modifier
@@ -151,7 +159,7 @@ fun TelemetryItem(telemetry: ConnectionTelemetry) {
 
             Spacer(modifier = Modifier.width(16.dp))
 
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = telemetry.appName,
                     color = MaterialTheme.colorScheme.onSurface,
@@ -164,11 +172,23 @@ fun TelemetryItem(telemetry: ConnectionTelemetry) {
                     fontSize = 12.sp
                 )
                 Spacer(modifier = Modifier.height(4.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    if (telemetry.direction != null) {
+                        val dirIcon = if (telemetry.direction == ConnectionDirection.OUTBOUND) "[->]" else "[<-]"
+                        val dirColor = if (telemetry.direction == ConnectionDirection.OUTBOUND) MatrixGreen else TacticalAmber
+                        Text(text = dirIcon, color = dirColor, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+
                     Text(text = telemetry.protocol, color = TacticalAmber, fontSize = 12.sp)
+
+                    var ipDisplay = "${telemetry.destIp}:${telemetry.destPort}"
+                    if (telemetry.countryCode != null && telemetry.city != null) {
+                        ipDisplay += " [${telemetry.countryCode} - ${telemetry.city}]"
+                    }
+
                     Text(
-                        text = "${telemetry.destIp}:${telemetry.destPort}",
-                        color = MatrixGreen,
+                        text = ipDisplay,
+                        color = if (isHighRisk) AlertRed else MatrixGreen,
                         fontSize = 12.sp
                     )
                 }
@@ -176,6 +196,13 @@ fun TelemetryItem(telemetry: ConnectionTelemetry) {
                     Text(
                         text = "Host: ${telemetry.resolvedHostname}",
                         color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = 12.sp
+                    )
+                }
+                if (telemetry.asn != null) {
+                    Text(
+                        text = "ASN: ${telemetry.asn}",
+                        color = TextSecondary,
                         fontSize = 12.sp
                     )
                 }

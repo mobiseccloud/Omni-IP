@@ -33,4 +33,11 @@ object PacketUtils {
     fun getDestPort(packet: ByteBuffer, ihl: Int): Int {
         return packet.getShort(ihl + 2).toInt() and 0xFFFF
     }
+
+    fun isTcpSyn(packet: ByteBuffer, ihl: Int): Boolean {
+        // TCP Header flags are at byte 13 of the TCP segment (ihl + 13)
+        // Bit 1 is SYN (0x02)
+        val flags = packet.get(ihl + 13).toInt() and 0xFF
+        return (flags and 0x02) != 0
+    }
 }

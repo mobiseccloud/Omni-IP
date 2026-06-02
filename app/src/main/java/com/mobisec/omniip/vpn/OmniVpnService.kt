@@ -7,6 +7,8 @@ import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.util.Log
+import com.maxmind.geoip2.DatabaseReader
+import com.mobisec.omniip.model.ConnectionDirection
 import com.mobisec.omniip.model.ConnectionTelemetry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -34,6 +36,9 @@ class OmniVpnService : VpnService() {
 
     private val dnsCache = ConcurrentHashMap<String, String>() // IP -> Hostname
 
+    private var cityDbReader: DatabaseReader? = null
+    private var asnDbReader: DatabaseReader? = null
+
     companion object {
         private const val TAG = "OmniVpnService"
 
@@ -54,6 +59,7 @@ class OmniVpnService : VpnService() {
 
         vpnInterface?.let {
             vpnJob = scope.launch {
+                initGeoIp()
                 startInterception(it)
             }
         } ?: run {
@@ -62,6 +68,41 @@ class OmniVpnService : VpnService() {
         }
 
         return START_STICKY
+    }
+
+    private suspend fun initGeoIp() {
+        withContext(Dispatchers.IO) {
+            try {
+                val cityDbFile = java.io.File(cacheDir, "GeoLite2-City.mmdb")
+                val asnDbFile = java.io.File(cacheDir, "GeoLite2-ASN.mmdb")
+
+                if (!cityDbFile.exists()) {
+                    assets.open("GeoLite2-City.mmdb.gz").use { cityDbStream ->
+                        java.util.zip.GZIPInputStream(cityDbStream).use { input ->
+                            java.io.FileOutputStream(cityDbFile).use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                    }
+                }
+
+                if (!asnDbFile.exists()) {
+                    assets.open("GeoLite2-ASN.mmdb.gz").use { asnDbStream ->
+                        java.util.zip.GZIPInputStream(asnDbStream).use { input ->
+                            java.io.FileOutputStream(asnDbFile).use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                    }
+                }
+
+                cityDbReader = DatabaseReader.Builder(cityDbFile).build()
+                asnDbReader = DatabaseReader.Builder(asnDbFile).build()
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to initialize GeoIP databases", e)
+            }
+        }
     }
 
     private suspend fun startInterception(pfd: ParcelFileDescriptor) {
@@ -101,20 +142,58 @@ class OmniVpnService : VpnService() {
             if (destPort == 53) {
                 handleDnsRequest(packet, length, ihl, sourceIp, destIp, sourcePort, outputStream)
             } else {
-                handleGenericPacket(protocol, sourceIp, destIp, sourcePort, destPort)
+                handleGenericPacket(protocol, sourceIp, destIp, sourcePort, destPort, null)
             }
         } else if (protocol == 6) { // TCP
             val sourcePort = PacketUtils.getSourcePort(packet, ihl)
             val destPort = PacketUtils.getDestPort(packet, ihl)
-            handleGenericPacket(protocol, sourceIp, destIp, sourcePort, destPort)
+
+            var direction: String? = null
+            if (PacketUtils.isTcpSyn(packet, ihl)) {
+                if (sourceIp.hostAddress == "10.0.0.2") {
+                    direction = ConnectionDirection.OUTBOUND
+                } else if (destIp.hostAddress == "10.0.0.2") {
+                    direction = ConnectionDirection.INBOUND
+                }
+            }
+
+            handleGenericPacket(protocol, sourceIp, destIp, sourcePort, destPort, direction)
         }
     }
 
-    private suspend fun handleGenericPacket(protocol: Int, sourceIp: InetAddress, destIp: InetAddress, sourcePort: Int, destPort: Int) {
+    private suspend fun handleGenericPacket(protocol: Int, sourceIp: InetAddress, destIp: InetAddress, sourcePort: Int, destPort: Int, direction: String?) {
         val uid = resolveUid(protocol, sourceIp, sourcePort, destIp, destPort)
         if (uid != -1) {
             val appInfo = getAppInfo(uid)
             val hostname = destIp.hostAddress?.let { dnsCache[it] }
+
+            var countryName: String? = null
+            var countryIsoCode: String? = null
+            var cityName: String? = null
+            var asnName: String? = null
+
+            val targetIp = if (direction == ConnectionDirection.INBOUND) sourceIp else destIp
+
+            try {
+                if (!targetIp.isSiteLocalAddress && !targetIp.isLoopbackAddress) {
+                    cityDbReader?.let { reader ->
+                        val response = reader.city(targetIp)
+                        countryName = response.country.name
+                        countryIsoCode = response.country.isoCode
+                        cityName = response.city.name
+                    }
+                    asnDbReader?.let { reader ->
+                        val response = reader.asn(targetIp)
+                        val num = response.autonomousSystemNumber
+                        val org = response.autonomousSystemOrganization
+                        if (num != null) {
+                            asnName = "AS$num" + (if (org != null) " $org" else "")
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                // Ignore exceptions (e.g., AddressNotFoundException)
+            }
 
             val telemetry = ConnectionTelemetry(
                 appName = appInfo.first,
@@ -122,8 +201,13 @@ class OmniVpnService : VpnService() {
                 appIcon = appInfo.third,
                 protocol = if (protocol == 6) "TCP" else "UDP",
                 destPort = destPort,
-                destIp = destIp.hostAddress ?: "",
-                resolvedHostname = hostname
+                destIp = targetIp.hostAddress ?: "",
+                resolvedHostname = hostname,
+                country = countryName,
+                countryCode = countryIsoCode,
+                city = cityName,
+                asn = asnName,
+                direction = direction
             )
             _telemetryFlow.tryEmit(telemetry)
         }
@@ -236,5 +320,11 @@ class OmniVpnService : VpnService() {
         vpnJob?.cancel()
         vpnInterface?.close()
         vpnInterface = null
+        try {
+            cityDbReader?.close()
+            asnDbReader?.close()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error closing GeoIP readers", e)
+        }
     }
 }
