@@ -56,8 +56,11 @@ import androidx.work.NetworkType
 import androidx.work.ExistingPeriodicWorkPolicy
 import java.util.concurrent.TimeUnit
 import com.mobisec.omniip.worker.ThreatFeedWorker
+import com.mobisec.omniip.billing.BillingManager
+import androidx.lifecycle.lifecycleScope
 
 class MainActivity : ComponentActivity() {
+    lateinit var billingManager: BillingManager
 
     private val viewModel: TelemetryViewModel by viewModels()
 
@@ -74,6 +77,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        billingManager = BillingManager(this, lifecycleScope)
 
         // Schedule Threat Feed Worker
         val constraints = Constraints.Builder()
@@ -144,7 +148,10 @@ class MainActivity : ComponentActivity() {
                                     title = { Text("Premium Feature Locked") },
                                     text = { Text("Deep scanning with Nmap (-p- -A) requires a premium entitlement. Upgrade now to unlock advanced tactical capabilities.") },
                                     confirmButton = {
-                                        Button(onClick = { dashboardViewModel.dismissUpgradePrompt() }) {
+                                        Button(onClick = {
+                                            dashboardViewModel.dismissUpgradePrompt()
+                                            billingManager.launchBillingFlow(this@MainActivity, BillingManager.SKU_PERSONAL_TIER)
+                                        }) {
                                             Text("OK")
                                         }
                                     }

@@ -73,4 +73,6 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:$workVersion")
 
     implementation("com.google.guava:guava:33.1.0-android")
+    implementation("com.android.billingclient:billing-ktx:6.2.1")
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
 }
