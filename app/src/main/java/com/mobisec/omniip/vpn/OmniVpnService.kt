@@ -11,6 +11,7 @@ import android.util.Log
 import com.mobisec.omniip.db.AppDatabase
 import com.mobisec.omniip.db.Action
 import com.mobisec.omniip.db.TargetType
+import com.mobisec.omniip.db.FirewallRule
 import com.maxmind.geoip2.DatabaseReader
 import com.mobisec.omniip.model.ConnectionDirection
 import com.google.common.hash.BloomFilter
@@ -48,6 +49,29 @@ class OmniVpnService : VpnService() {
 
     private var cityDbReader: DatabaseReader? = null
     private var asnDbReader: DatabaseReader? = null
+
+    // Behavioral Heuristics token buckets
+    private val uidTokenBuckets = java.util.concurrent.ConcurrentHashMap<Int, TokenBucket>()
+    private val MAX_REQUESTS_PER_HOUR = 100 // Default configurable threshold
+
+    class TokenBucket(val capacity: Int, val refillRateMs: Long) {
+        var tokens: Int = capacity
+        var lastRefillTimestamp: Long = System.currentTimeMillis()
+
+        fun consume(): Boolean {
+            val now = System.currentTimeMillis()
+            val elapsed = now - lastRefillTimestamp
+            if (elapsed > refillRateMs) {
+                tokens = capacity
+                lastRefillTimestamp = now
+            }
+            if (tokens > 0) {
+                tokens--
+                return true
+            }
+            return false
+        }
+    }
 
     companion object {
         private const val TAG = "OmniVpnService"
@@ -235,7 +259,8 @@ class OmniVpnService : VpnService() {
                         val num = response.autonomousSystemNumber
                         val org = response.autonomousSystemOrganization
                         if (num != null) {
-                            asnName = "AS$num" + (if (org != null) " $org" else "")
+                            val orgStr = if (org != null) " $org" else ""
+                            asnName = "AS$num$orgStr"
                         }
                     }
                 }
@@ -267,6 +292,63 @@ val targetIpString = targetIp.hostAddress ?: ""
                 if (ruleCache.containsKey(domainKey)) {
                     finalAction = ruleCache[domainKey]!!
                     ruleApplied = true
+                }
+            }
+
+            // Behavioral Heuristic: Rate-Limiting Check
+            if (uid != -1 && (destPort == 53 || destPort == 80 || destPort == 443)) {
+                // Determine if this is DNS or TCP SYN
+                val isDns = destPort == 53
+                val isTcpSyn = protocol == 6 && direction == ConnectionDirection.OUTBOUND
+
+                if (isDns || isTcpSyn) {
+                    val bucket = uidTokenBuckets.getOrPut(uid) {
+                        TokenBucket(MAX_REQUESTS_PER_HOUR, 3600000L) // 1 hour refill rate
+                    }
+                    if (!bucket.consume()) {
+                        // Rate limit exceeded, generate a FLAG rule if one doesn't exist
+                        if (!ruleCache.containsKey("${TargetType.APPLICATION.name}:$uid")) {
+                            finalAction = Action.FLAG
+                            ruleApplied = true
+
+                            // Insert FLAG rule into Room database
+                            scope.launch(Dispatchers.IO) {
+                                val db = AppDatabase.getDatabase(this@OmniVpnService)
+                                val dao = db.firewallRuleDao()
+                                val newRule = FirewallRule(targetType = TargetType.APPLICATION, targetValue = uid.toString(), action = Action.FLAG)
+                                dao.insertRule(newRule)
+                            }
+
+                            // Update ruleCache
+                            ruleCache["${TargetType.APPLICATION.name}:$uid"] = Action.FLAG
+
+                            // Send notification
+                            val notificationManager = getSystemService(android.app.NotificationManager::class.java)
+                            val channelId = "omni_ip_heuristics"
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                val channel = android.app.NotificationChannel(channelId, "Behavioral Heuristics", android.app.NotificationManager.IMPORTANCE_HIGH)
+                                notificationManager.createNotificationChannel(channel)
+                            }
+
+                            // Intent to open Dashboard/App
+                            val intent = Intent(this, com.mobisec.omniip.MainActivity::class.java)
+                            val pendingIntent = android.app.PendingIntent.getActivity(this, 0, intent, android.app.PendingIntent.FLAG_IMMUTABLE)
+
+                            val notification = androidx.core.app.NotificationCompat.Builder(this, channelId)
+                                .setContentTitle("Tactical Alert: Anomalous Behavior")
+                                .setContentText("App (UID: $uid) exceeded network threshold. Flagged automatically.")
+                                .setSmallIcon(android.R.drawable.ic_dialog_alert)
+                                .setContentIntent(pendingIntent)
+                                .setOnlyAlertOnce(true)
+                                .setAutoCancel(true)
+                                .build()
+
+                            notificationManager.notify(uid, notification)
+                        } else if (!ruleApplied || finalAction != Action.BLOCK) {
+                            finalAction = Action.FLAG
+                            ruleApplied = true
+                        }
+                    }
                 }
             }
 

@@ -14,12 +14,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mobisec.omniip.db.Action
 import com.mobisec.omniip.db.FirewallRule
+import com.mobisec.omniip.db.TargetType
 import com.mobisec.omniip.ui.theme.AlertRed
 import com.mobisec.omniip.ui.theme.MatrixGreen
 import com.mobisec.omniip.ui.theme.TacticalAmber
 import com.mobisec.omniip.ui.theme.TextSecondary
 import com.mobisec.omniip.viewmodel.RulesViewModel
 import kotlinx.coroutines.launch
+import android.content.Intent
+import android.net.Uri
+import android.provider.Settings
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Info
 
 @Composable
 fun RulesScreen(viewModel: RulesViewModel) {
@@ -65,6 +72,8 @@ fun RulesScreen(viewModel: RulesViewModel) {
 fun RuleItem(rule: FirewallRule, viewModel: RulesViewModel) {
     var showOptions by remember { mutableStateOf(false) }
 
+    val context = LocalContext.current
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -87,6 +96,30 @@ fun RuleItem(rule: FirewallRule, viewModel: RulesViewModel) {
                 Action.IGNORE -> MatrixGreen
             }
             Text(text = rule.action.name, color = color, fontWeight = FontWeight.Bold)
+
+            if (rule.targetType == TargetType.APPLICATION) {
+                IconButton(onClick = {
+                    try {
+                        val pm = context.packageManager
+                        val packages = pm.getPackagesForUid(rule.targetValue.toInt())
+                        if (!packages.isNullOrEmpty()) {
+                            val packageName = packages[0]
+                            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                data = Uri.parse("package:$packageName")
+                            }
+                            context.startActivity(intent)
+                        }
+                    } catch (e: Exception) {
+                        // UID might not exist anymore or parse error
+                    }
+                }) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = "App Info",
+                        tint = TacticalAmber
+                    )
+                }
+            }
         }
     }
 
