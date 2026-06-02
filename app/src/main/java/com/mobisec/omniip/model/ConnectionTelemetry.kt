@@ -14,7 +14,11 @@ data class ConnectionTelemetry(
     val countryCode: String? = null,
     val city: String? = null,
     val asn: String? = null,
-    val direction: String? = null
+    val direction: String? = null,
+    val uid: Int = -1,
+    val isBlocked: Boolean = false,
+    val isFlagged: Boolean = false,
+    val isIgnored: Boolean = false
 )
 
 object ConnectionDirection {
