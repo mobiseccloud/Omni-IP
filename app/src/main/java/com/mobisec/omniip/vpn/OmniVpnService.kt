@@ -23,6 +23,10 @@ import com.mobisec.omniip.model.ConnectionTelemetry
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -55,6 +59,10 @@ class OmniVpnService : VpnService() {
     // Behavioral Heuristics token buckets
     private val uidTokenBuckets = java.util.concurrent.ConcurrentHashMap<Int, TokenBucket>()
     private val MAX_REQUESTS_PER_HOUR = 100 // Default configurable threshold
+
+    private val httpClient: OkHttpClient by lazy {
+        OkHttpClient.Builder().build()
+    }
 
     class TokenBucket(val capacity: Int, val refillRateMs: Long) {
         var tokens: Int = capacity
@@ -101,6 +109,7 @@ class OmniVpnService : VpnService() {
         val builder = Builder()
             .addAddress("10.0.0.2", 24)
             .addRoute("0.0.0.0", 0)
+            .addDisallowedApplication(packageName)
             .setSession("Omni-IP Telemetry Engine")
             .setMtu(1500)
 
@@ -294,14 +303,23 @@ class OmniVpnService : VpnService() {
     private suspend fun handleGenericPacket(protocol: Int, sourceIp: InetAddress, destIp: InetAddress, sourcePort: Int, destPort: Int, direction: String?, packet: ByteBuffer, length: Int, outputStream: FileOutputStream, uid: Int) {
         if (uid != -1) {
             val appInfo = getAppInfo(uid)
-            val hostname = destIp.hostAddress?.let { dnsCache[it] }
+            var hostname = destIp.hostAddress?.let { dnsCache[it] }
+
+            // Extract SNI domain from TCP port 443 packets
+            if (protocol == 6 && destPort == 443) {
+                val ihl = PacketUtils.getIHL(packet)
+                val sni = SniExtractor.getSni(packet, ihl)
+                if (sni != null) {
+                    hostname = "[SNI] $sni"
+                }
+            }
 
             var countryName: String? = null
             var countryIsoCode: String? = null
             var cityName: String? = null
             var asnName: String? = null
 
-            val targetIp = if (direction == ConnectionDirection.INBOUND) sourceIp else destIp
+            val targetIp = if (direction == ConnectionDirection.INBOUND) { sourceIp } else { destIp }
 
             try {
                 if (!targetIp.isSiteLocalAddress && !targetIp.isLoopbackAddress) {
@@ -349,6 +367,13 @@ val targetIpString = targetIp.hostAddress ?: ""
                 if (ruleCache.containsKey(domainKey)) {
                     finalAction = ruleCache[domainKey]!!
                     ruleApplied = true
+                } else if (hostname.startsWith("[SNI] ")) {
+                    val rawDomain = hostname.substring(6)
+                    val rawDomainKey = "${TargetType.DOMAIN.name}:$rawDomain"
+                    if (ruleCache.containsKey(rawDomainKey)) {
+                        finalAction = ruleCache[rawDomainKey]!!
+                        ruleApplied = true
+                    }
                 }
             }
 
@@ -446,7 +471,7 @@ val targetIpString = targetIp.hostAddress ?: ""
                 appName = appInfo.first,
                 packageName = appInfo.second,
                 appIcon = appInfo.third,
-                protocol = if (protocol == 6) "TCP" else "UDP",
+                protocol = if (protocol == 6) { "TCP" } else { "UDP" },
                 destPort = destPort,
                 destIp = targetIpString,
                 resolvedHostname = hostname,
@@ -456,9 +481,9 @@ val targetIpString = targetIp.hostAddress ?: ""
                 asn = asnName,
                 direction = direction,
                 uid = uid,
-                isBlocked = if (ruleApplied && finalAction == Action.BLOCK) true else false,
-                isFlagged = if (ruleApplied && finalAction == Action.FLAG) true else false,
-                isIgnored = if (ruleApplied && finalAction == Action.IGNORE) true else false
+                isBlocked = (ruleApplied && finalAction == Action.BLOCK),
+                isFlagged = (ruleApplied && finalAction == Action.FLAG),
+                isIgnored = (ruleApplied && finalAction == Action.IGNORE)
             )
             _telemetryFlow.tryEmit(telemetry)
 
@@ -543,45 +568,48 @@ val targetIpString = targetIp.hostAddress ?: ""
     private suspend fun forwardDnsRequest(dnsPayload: ByteArray, originalSourceIp: InetAddress, originalDestIp: InetAddress, originalSourcePort: Int, outputStream: FileOutputStream) {
         withContext(Dispatchers.IO) {
             try {
-                val dnsSocket = DatagramSocket()
-                protect(dnsSocket)
+                val mediaType = "application/dns-message".toMediaType()
+                val requestBody = dnsPayload.toRequestBody(mediaType)
 
-                // Use a real DNS server for forwarding
-                val dnsServer = InetAddress.getByName("8.8.8.8")
-                val request = DatagramPacket(dnsPayload, dnsPayload.size, dnsServer, 53)
-                dnsSocket.send(request)
+                val request = Request.Builder()
+                    .url("https://cloudflare-dns.com/dns-query")
+                    .post(requestBody)
+                    .addHeader("Accept", "application/dns-message")
+                    .build()
 
-                val buffer = ByteArray(1024)
-                val response = DatagramPacket(buffer, buffer.size)
-                dnsSocket.soTimeout = 5000
-                dnsSocket.receive(response)
+                val response = httpClient.newCall(request).execute()
 
-                val responsePayload = response.data.copyOfRange(0, response.length)
-                val responseDnsPacket = DnsPacket(responsePayload, 0, responsePayload.size)
+                if (response.isSuccessful) {
+                    val responseBody = response.body?.bytes()
+                    if (responseBody != null) {
+                        val responseDnsPacket = DnsPacket(responseBody, 0, responseBody.size)
 
-                val domain = responseDnsPacket.domain
-                if (domain != null) {
-                    val resolvedIps = responseDnsPacket.getResolvedIps()
-                    for (ip in resolvedIps) {
-                        dnsCache[ip] = domain
+                        val domain = responseDnsPacket.domain
+                        if (domain != null) {
+                            val resolvedIps = responseDnsPacket.getResolvedIps()
+                            for (ip in resolvedIps) {
+                                dnsCache[ip] = domain
+                            }
+                        }
+
+                        // Reconstruct IP/UDP header and write back
+                        val responsePacket = IPPacketBuilder.buildUdpResponse(
+                            sourceIp = originalDestIp,
+                            destIp = originalSourceIp,
+                            sourcePort = 53,
+                            destPort = originalSourcePort,
+                            payload = responseBody
+                        )
+
+                        outputStream.write(responsePacket)
                     }
+                } else {
+                    Log.e(TAG, "DoH query failed with code: ${response.code}")
                 }
-
-                // Reconstruct IP/UDP header and write back
-                val responsePacket = IPPacketBuilder.buildUdpResponse(
-                    sourceIp = originalDestIp,
-                    destIp = originalSourceIp,
-                    sourcePort = 53,
-                    destPort = originalSourcePort,
-                    payload = responsePayload
-                )
-
-                outputStream.write(responsePacket)
-
-                dnsSocket.close()
             } catch (e: Exception) {
                 Log.e(TAG, "DNS forwarding failed", e)
             }
+            Unit
         }
     }
 
