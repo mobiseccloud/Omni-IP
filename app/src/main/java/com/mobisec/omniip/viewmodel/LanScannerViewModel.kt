@@ -70,9 +70,13 @@ class LanScannerViewModel(application: Application, private val savedStateHandle
                             val mac = tokens[3].uppercase()
 
                             // Check valid MAC format and not 00:00:00:00:00:00
-                            if (mac.matches("([0-9A-F]{2}:){5}[0-9A-F]{2}".toRegex()) && mac != "00:00:00:00:00:00") {
-                                val vendor = resolveVendorOptimized(mac)
-                                newDevices.add(DiscoveredDevice(ip, mac, vendor))
+                            if (mac.matches("([0-9A-F]{2}:){5}[0-9A-F]{2}".toRegex())) {
+                                if (mac != "00:00:00:00:00:00" && mac != "02:00:00:00:00:00") {
+                                    val vendor = resolveVendorOptimized(mac)
+                                    newDevices.add(DiscoveredDevice(ip, mac, vendor))
+                                } else if (mac == "02:00:00:00:00:00") {
+                                    newDevices.add(DiscoveredDevice(ip, mac, "Unknown (API 29+)"))
+                                }
                             }
                         }
                         line = reader.readLine()

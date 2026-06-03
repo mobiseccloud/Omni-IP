@@ -230,7 +230,7 @@ class MainActivity : ComponentActivity() {
                             val isRecording by OmniVpnService.isPcapRecordingFlow.collectAsState()
                             val pcapSize by OmniVpnService.pcapFileSizeFlow.collectAsState()
                             val targetUid = OmniVpnService.targetRecordUid
-                            val appInfo = targetUid?.let { OmniVpnService.appInfoCache[it] }
+                            val appInfo = targetUid?.let { OmniVpnService.appInfoCache.getIfPresent(it) }
                             val targetName = if (targetUid == null) "All Traffic" else (appInfo?.first ?: "Unknown App")
                             val metrics by OmniVpnService.currentTargetMetricsFlow.collectAsState()
                             val activeApps by OmniVpnService.activeAppsFlow.collectAsState()
