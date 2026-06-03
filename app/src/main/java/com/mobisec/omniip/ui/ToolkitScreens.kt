@@ -232,10 +232,12 @@ fun DnsLookupScreen() {
 }
 
 @Composable
-fun PortScannerScreen(onRequirePremium: () -> Unit = {}) {
-    var target by rememberSaveable { mutableStateOf("") }
-    var output by rememberSaveable { mutableStateOf("") }
-        val coroutineScope = rememberCoroutineScope()
+fun PortScannerScreen(
+    viewModel: com.mobisec.omniip.viewmodel.PortScannerViewModel = androidx.lifecycle.viewmodel.compose.viewModel(),
+    onRequirePremium: () -> Unit = {}
+) {
+    val target by viewModel.target.collectAsState()
+    val output by viewModel.output.collectAsState()
 
     Column(modifier = Modifier.fillMaxSize().background(PureBlack).padding(16.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -246,7 +248,7 @@ fun PortScannerScreen(onRequirePremium: () -> Unit = {}) {
         Spacer(modifier = Modifier.height(16.dp))
         OutlinedTextField(
             value = target,
-            onValueChange = { target = it },
+            onValueChange = { viewModel.updateTarget(it) },
             label = { Text("Target IP", color = MatrixGreen) },
             colors = OutlinedTextFieldDefaults.colors(
                 focusedTextColor = MatrixGreen,
@@ -259,28 +261,14 @@ fun PortScannerScreen(onRequirePremium: () -> Unit = {}) {
         Spacer(modifier = Modifier.height(8.dp))
         Row {
             Button(
-                onClick = {
-                    coroutineScope.launch {
-                        output = "Starting Fast Scan on $target..."
-                        output = withContext(Dispatchers.IO) {
-                            NativeEngine.executeNmapScan(target)
-                        }
-                    }
-                },
+                onClick = { viewModel.startFastScan() },
                 colors = ButtonDefaults.buttonColors(containerColor = MatrixGreen)
             ) {
                 Text("Fast Scan", color = PureBlack)
             }
             Spacer(modifier = Modifier.width(8.dp))
             Button(
-                onClick = {
-                    coroutineScope.launch {
-                        output = "Starting Deep Scan on $target..."
-                        output = withContext(Dispatchers.IO) {
-                            NativeEngine.executeNmapScan("$target -p- -A")
-                        }
-                    }
-                },
+                onClick = { viewModel.startDeepScan() },
                 colors = ButtonDefaults.buttonColors(containerColor = TacticalAmber)
             ) {
                 Text("Deep Scan (Premium)", color = PureBlack)
@@ -387,7 +375,7 @@ fun ConnectionLogScreen(viewModel: ConnectionLogViewModel = viewModel()) {
                         Text("${log.destIp}:${log.destPort}", color = textColor, fontSize = 14.sp)
                         if (log.countryCode != null || log.city != null || log.asn != null) {
                             val geoStr = listOfNotNull(log.countryCode, log.city, log.asn).joinToString(" - ")
-                            Text(geoStr, color = Color.Gray, fontSize = 12.sp)
+                            Text(geoStr, color = MatrixGreen.copy(alpha = 0.6f), fontSize = 12.sp)
                         }
                     }
                 }
@@ -471,6 +459,7 @@ fun IpConverterScreen(viewModel: IpConverterViewModel = viewModel()) {
 fun WifiScannerScreen(onRequirePremium: () -> Unit = {}) {
     var output by rememberSaveable { mutableStateOf("Ready to scan WiFi networks...") }
     val coroutineScope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     Column(modifier = Modifier.fillMaxSize().background(PureBlack).padding(16.dp)) {
         Text("WIFI SCANNER MODULE", color = MatrixGreen, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
@@ -479,9 +468,24 @@ fun WifiScannerScreen(onRequirePremium: () -> Unit = {}) {
             onClick = {
                 coroutineScope.launch {
                     output = "Scanning WiFi networks..."
-                    // Simulated WiFi scan
                     output = withContext(Dispatchers.IO) {
-                        "SSID: Corporate-Secure (BSSID: 00:11:22:33:44:55)\nSignal: -45 dBm\nSecurity: WPA3\n\nSSID: Guest (BSSID: 00:11:22:33:44:56)\nSignal: -70 dBm\nSecurity: Open"
+                        try {
+                            val wifiManager = context.applicationContext.getSystemService(android.content.Context.WIFI_SERVICE) as android.net.wifi.WifiManager
+                            val scanResults = wifiManager.scanResults
+                            if (scanResults.isEmpty()) {
+                                "> ERROR: Hardware scan returned no results. Ensure Location Services are enabled."
+                            } else {
+                                scanResults.joinToString("\n\n") { result ->
+                                    val ssid = if (result.SSID.isNullOrEmpty()) "[Hidden SSID]" else result.SSID
+                                    val bssid = result.BSSID ?: "Unknown BSSID"
+                                    val level = result.level
+                                    val capabilities = result.capabilities ?: "Unknown"
+                                    "SSID: $ssid (BSSID: $bssid)\nSignal: $level dBm\nSecurity: $capabilities"
+                                }
+                            }
+                        } catch (e: Exception) {
+                            "> ERROR: Failed to scan WiFi networks: ${e.message}"
+                        }
                     }
                 }
             },
@@ -512,8 +516,8 @@ fun NetworkStatsScreen(viewModel: NetworkStatsViewModel = viewModel()) {
                         Text(iface.name, fontWeight = FontWeight.Bold, color = MatrixGreen, fontSize = 16.sp)
                         Spacer(modifier = Modifier.height(4.dp))
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("RX: ${formatBytes(iface.rxBytes)}", color = Color.LightGray, fontSize = 14.sp)
-                            Text("TX: ${formatBytes(iface.txBytes)}", color = Color.LightGray, fontSize = 14.sp)
+                            Text("RX: ${formatBytes(iface.rxBytes)}", color = MatrixGreen.copy(alpha = 0.6f), fontSize = 14.sp)
+                            Text("TX: ${formatBytes(iface.txBytes)}", color = MatrixGreen.copy(alpha = 0.6f), fontSize = 14.sp)
                         }
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Speed: ${formatBytes(iface.rxSpeed)}/s", color = MatrixGreen, fontSize = 14.sp)

@@ -15,7 +15,7 @@ fun ToolkitNavHost(onRequirePremium: () -> Unit = {}) {
         composable("whois") { WhoisScreen() }
         composable("traceroute") { TracerouteScreen() }
         composable("dns") { DnsLookupScreen() }
-        composable("portscan") { PortScannerScreen(onRequirePremium) }
+        composable("portscan") { PortScannerScreen(onRequirePremium = onRequirePremium) }
         composable("ipcalc") { IpCalculatorScreen() }
         composable("connlog") { ConnectionLogScreen() }
         composable("router") { RouterSetupScreen() }
