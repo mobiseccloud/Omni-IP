@@ -26,6 +26,7 @@ std::mutex native_exec_mutex;
 static uint32_t g_auth_state = 0x00000000;
 const uint32_t FLAG_DEBUG = 0x1A2B3C4D;
 const uint32_t FLAG_PREMIUM = 0x9F8E7D6C;
+const uint32_t FLAG_VERIFIED_INSTALL = 0x11223344;
 
 bool is_safe(const std::string& input) {
     for (char c : input) {
@@ -223,6 +224,109 @@ Java_com_mobisec_omniip_core_NativeEngine_initializeNativeEnvironment(
     if (isDebug) {
         g_auth_state |= FLAG_DEBUG;
     }
+}
+
+void detectDebugger() {
+    FILE *fp = fopen("/proc/self/status", "r");
+    if (fp) {
+        char line[256];
+        while (fgets(line, sizeof(line), fp)) {
+            if (strncmp(line, "TracerPid:", 10) == 0) {
+                int tracerPid = 0;
+                if (sscanf(line, "TracerPid: %d", &tracerPid) == 1) {
+                    if (tracerPid > 0) {
+                        if ((g_auth_state & FLAG_DEBUG) == 0) {
+                            raise(SIGKILL);
+                        } else {
+                            // Debug build, skip killing
+                            __android_log_print(ANDROID_LOG_WARN, "OmniIP-RASP", "Debugger attached (TracerPid > 0), but ignoring due to debug build.");
+                        }
+                    }
+                }
+                break;
+            }
+        }
+        fclose(fp);
+    }
+}
+
+#include <android/log.h>
+
+void detectCompromisedEnvironment() {
+    bool is_compromised = false;
+
+    // Implementation 1 (Root): Check for su binaries
+    if (access("/sbin/su", F_OK) == 0 ||
+        access("/system/bin/su", F_OK) == 0 ||
+        access("/system/xbin/su", F_OK) == 0) {
+        is_compromised = true;
+    }
+
+    // Implementation 2 (Frida): Check loaded memory regions
+    FILE *fp = fopen("/proc/self/maps", "r");
+    if (fp) {
+        char line[512];
+        while (fgets(line, sizeof(line), fp)) {
+            if (strstr(line, "frida") != nullptr) {
+                is_compromised = true;
+                break;
+            }
+        }
+        fclose(fp);
+    }
+
+    if (is_compromised) {
+        if ((g_auth_state & FLAG_DEBUG) == 0) {
+            __android_log_print(ANDROID_LOG_ERROR, "OmniIP-RASP", "SEVERE: Compromised environment detected (Root/Frida). Stripping premium flags.");
+            g_auth_state &= ~FLAG_PREMIUM;
+        } else {
+            __android_log_print(ANDROID_LOG_WARN, "OmniIP-RASP", "Compromised environment detected (Root/Frida), but ignoring due to debug build.");
+        }
+    }
+}
+
+void verifyInstallerSource(JNIEnv* env, jobject context) {
+    jclass contextClass = env->GetObjectClass(context);
+
+    jmethodID getPackageManagerMethod = env->GetMethodID(contextClass, "getPackageManager", "()Landroid/content/pm/PackageManager;");
+    jobject packageManager = env->CallObjectMethod(context, getPackageManagerMethod);
+
+    jmethodID getPackageNameMethod = env->GetMethodID(contextClass, "getPackageName", "()Ljava/lang/String;");
+    jstring packageName = (jstring) env->CallObjectMethod(context, getPackageNameMethod);
+
+    jclass packageManagerClass = env->GetObjectClass(packageManager);
+    jmethodID getInstallerPackageNameMethod = env->GetMethodID(packageManagerClass, "getInstallerPackageName", "(Ljava/lang/String;)Ljava/lang/String;");
+    jstring installerPackageName = (jstring) env->CallObjectMethod(packageManager, getInstallerPackageNameMethod, packageName);
+
+    bool is_verified = false;
+    if (installerPackageName != nullptr) {
+        const char *installerStr = env->GetStringUTFChars(installerPackageName, 0);
+        if (installerStr != nullptr) {
+            std::string installerString(installerStr);
+            if (installerString == "com.android.vending") {
+                is_verified = true;
+            }
+            env->ReleaseStringUTFChars(installerPackageName, installerStr);
+        }
+    }
+
+    if (!is_verified) {
+        if ((g_auth_state & FLAG_DEBUG) == 0) {
+            g_auth_state &= ~FLAG_VERIFIED_INSTALL;
+        } else {
+            __android_log_print(ANDROID_LOG_WARN, "OmniIP-RASP", "Invalid installer source detected, but ignoring due to debug build.");
+        }
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mobisec_omniip_core_NativeEngine_executeSecuritySweep(
+        JNIEnv* env,
+        jobject /* this */,
+        jobject context) {
+    verifyInstallerSource(env, context);
+    detectDebugger();
+    detectCompromisedEnvironment();
 }
 
 extern "C" JNIEXPORT void JNICALL

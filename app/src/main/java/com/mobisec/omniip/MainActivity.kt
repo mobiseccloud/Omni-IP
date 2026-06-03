@@ -127,6 +127,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         com.mobisec.omniip.core.NativeEngine.initializeNativeEnvironment(com.mobisec.omniip.BuildConfig.DEBUG)
+        com.mobisec.omniip.core.NativeEngine.executeSecuritySweep(this)
         billingManager = BillingManager(this, lifecycleScope)
 
         initViewModel.startInitialization()
