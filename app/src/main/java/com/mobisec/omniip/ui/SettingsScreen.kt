@@ -1,6 +1,8 @@
 package com.mobisec.omniip.ui
 
 import android.content.Context
+import android.content.Intent
+import com.mobisec.omniip.DocumentViewerActivity
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -15,6 +17,7 @@ import com.mobisec.omniip.db.Action
 import com.mobisec.omniip.ui.theme.AlertRed
 import com.mobisec.omniip.ui.theme.MatrixGreen
 import com.mobisec.omniip.ui.theme.TacticalAmber
+import com.mobisec.omniip.ui.theme.SurfaceDark
 import java.io.File
 
 @Composable
@@ -114,6 +117,59 @@ fun SettingsScreen() {
             modifier = Modifier.fillMaxWidth()
         )
         Spacer(modifier = Modifier.height(8.dp))
+
+        Spacer(modifier = Modifier.height(24.dp))
+        HorizontalDivider(color = TacticalAmber)
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Text("Compliance Documentation", fontSize = 20.sp, color = MatrixGreen)
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Button(
+            onClick = {
+                val intent = Intent(context, DocumentViewerActivity::class.java).apply {
+                    putExtra("DOC_NAME", "PrivacyPolicy.md")
+                }
+                context.startActivity(intent)
+            },
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark)
+        ) {
+            Text("Privacy Policy", color = MatrixGreen)
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Button(
+            onClick = {
+                val intent = Intent(context, DocumentViewerActivity::class.java).apply {
+                    putExtra("DOC_NAME", "VpnServiceDisclosure.md")
+                }
+                context.startActivity(intent)
+            },
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark)
+        ) {
+            Text("VpnService Disclosure", color = MatrixGreen)
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Button(
+            onClick = {
+                val intent = Intent(context, DocumentViewerActivity::class.java).apply {
+                    putExtra("DOC_NAME", "DataHandling.md")
+                }
+                context.startActivity(intent)
+            },
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark)
+        ) {
+            Text("Data Handling Policy", color = MatrixGreen)
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+
         OutlinedTextField(
             value = abuseIpDbKey,
             onValueChange = {
