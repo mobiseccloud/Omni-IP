@@ -16,6 +16,7 @@ import com.mobisec.omniip.db.TargetType
 import com.mobisec.omniip.db.FirewallRule
 import com.maxmind.geoip2.DatabaseReader
 import com.mobisec.omniip.model.ConnectionDirection
+import com.google.common.cache.CacheBuilder
 import com.google.common.hash.BloomFilter
 import com.google.common.hash.Funnels
 import java.io.File
@@ -57,7 +58,10 @@ class OmniVpnService : VpnService() {
     private var asnDbReader: DatabaseReader? = null
 
     // Behavioral Heuristics token buckets
-    private val uidTokenBuckets = java.util.concurrent.ConcurrentHashMap<Int, TokenBucket>()
+    private val uidTokenBuckets = CacheBuilder.newBuilder()
+        .expireAfterAccess(2, java.util.concurrent.TimeUnit.HOURS)
+        .maximumSize(5000)
+        .build<Int, TokenBucket>()
     private val MAX_REQUESTS_PER_HOUR = 100 // Default configurable threshold
 
     private val httpClient: OkHttpClient by lazy {
@@ -94,7 +98,10 @@ class OmniVpnService : VpnService() {
         var isPcapRecordingFlow = kotlinx.coroutines.flow.MutableStateFlow(false)
 
         var targetRecordUid: Int? = null
-        val exfiltrationTracker = ConcurrentHashMap<Int, ExfiltrationMetrics>()
+        val exfiltrationTracker = CacheBuilder.newBuilder()
+            .expireAfterAccess(2, java.util.concurrent.TimeUnit.HOURS)
+            .maximumSize(5000)
+            .build<Int, ExfiltrationMetrics>()
         var activeAppsFlow = kotlinx.coroutines.flow.MutableStateFlow<List<Pair<Int, String>>>(emptyList())
         val appInfoCache = ConcurrentHashMap<Int, Triple<String, String, Drawable?>>()
         var currentTargetMetricsFlow = kotlinx.coroutines.flow.MutableStateFlow(ExfiltrationMetrics())
@@ -128,7 +135,7 @@ class OmniVpnService : VpnService() {
                 if (isPcapRecordingFlow.value) {
                     val targetUid = targetRecordUid
                     if (targetUid != null) {
-                        val metrics = exfiltrationTracker[targetUid]
+                        val metrics = exfiltrationTracker.getIfPresent(targetUid)
                         if (metrics != null) {
                             currentTargetMetricsFlow.value = ExfiltrationMetrics(metrics.txBytes, metrics.rxBytes)
                         }
@@ -257,7 +264,7 @@ class OmniVpnService : VpnService() {
 
         // Exfiltration Accounting
         if (uid != -1) {
-            val metrics = exfiltrationTracker.getOrPut(uid) { ExfiltrationMetrics() }
+            val metrics = exfiltrationTracker.get(uid) { ExfiltrationMetrics() }
             if (sourceIp.hostAddress == "10.0.0.2") {
                 metrics.txBytes += length // Outbound
             } else if (destIp.hostAddress == "10.0.0.2") {
@@ -384,7 +391,7 @@ val targetIpString = targetIp.hostAddress ?: ""
                 val isTcpSyn = protocol == 6 && direction == ConnectionDirection.OUTBOUND
 
                 if (isDns || isTcpSyn) {
-                    val bucket = uidTokenBuckets.getOrPut(uid) {
+                    val bucket = uidTokenBuckets.get(uid) {
                         TokenBucket(MAX_REQUESTS_PER_HOUR, 3600000L) // 1 hour refill rate
                     }
                     if (!bucket.consume()) {

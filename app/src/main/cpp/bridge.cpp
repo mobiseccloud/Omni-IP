@@ -14,7 +14,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <mutex>
 
+std::mutex native_exec_mutex;
 
 bool g_premium_unlocked = false;
 
@@ -50,7 +52,8 @@ Java_com_mobisec_omniip_core_NativeEngine_executeNmapScan(
         JNIEnv* env,
         jobject /* this */,
         jstring target) {
-        const char *targetStr = env->GetStringUTFChars(target, 0);
+    std::lock_guard<std::mutex> lock(native_exec_mutex);
+    const char *targetStr = env->GetStringUTFChars(target, 0);
     std::string target_str(targetStr);
 
     if (!is_safe(target_str)) {
@@ -78,7 +81,8 @@ Java_com_mobisec_omniip_core_NativeEngine_executeRawPing(
         JNIEnv* env,
         jobject /* this */,
         jstring target) {
-        const char *targetStr = env->GetStringUTFChars(target, 0);
+    std::lock_guard<std::mutex> lock(native_exec_mutex);
+    const char *targetStr = env->GetStringUTFChars(target, 0);
     std::string target_str(targetStr);
 
     if (!is_safe(target_str)) {
