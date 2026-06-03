@@ -18,6 +18,7 @@ import com.mobisec.omniip.db.ConnectionLog
 import com.maxmind.geoip2.DatabaseReader
 import com.mobisec.omniip.model.ConnectionDirection
 import com.google.common.cache.CacheBuilder
+import com.google.common.cache.Cache
 import com.google.common.hash.BloomFilter
 import com.google.common.hash.Funnels
 import java.io.File
@@ -50,8 +51,14 @@ class OmniVpnService : VpnService() {
     private var vpnJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    private val dnsCache = ConcurrentHashMap<String, String>() // IP -> Hostname
-    private val ruleCache = ConcurrentHashMap<String, Action>()
+    private val dnsCache: Cache<String, String> = CacheBuilder.newBuilder()
+        .expireAfterAccess(2, java.util.concurrent.TimeUnit.HOURS)
+        .maximumSize(5000)
+        .build()
+    private val ruleCache: Cache<String, Action> = CacheBuilder.newBuilder()
+        .expireAfterAccess(2, java.util.concurrent.TimeUnit.HOURS)
+        .maximumSize(10000)
+        .build()
     private var threatBloomFilter: BloomFilter<CharSequence>? = null
     private var threatFeedsLastUpdated: Long = 0
 
@@ -104,7 +111,10 @@ class OmniVpnService : VpnService() {
             .maximumSize(5000)
             .build<Int, ExfiltrationMetrics>()
         var activeAppsFlow = kotlinx.coroutines.flow.MutableStateFlow<List<Pair<Int, String>>>(emptyList())
-        val appInfoCache = ConcurrentHashMap<Int, Triple<String, String, Drawable?>>()
+        val appInfoCache: Cache<Int, Triple<String, String, Drawable?>> = CacheBuilder.newBuilder()
+            .expireAfterAccess(2, java.util.concurrent.TimeUnit.HOURS)
+            .maximumSize(1000)
+            .build()
 
         private val sessionLogCache = CacheBuilder.newBuilder()
             .expireAfterWrite(10, java.util.concurrent.TimeUnit.MINUTES)
@@ -153,10 +163,10 @@ class OmniVpnService : VpnService() {
 
         scope.launch(Dispatchers.IO) {
             AppDatabase.getDatabase(this@OmniVpnService).firewallRuleDao().getAllRules().collect { rules ->
-                ruleCache.clear()
+                ruleCache.invalidateAll()
                 for (rule in rules) {
                     val key = "${rule.targetType.name}:${rule.targetValue}"
-                    ruleCache[key] = rule.action
+                    ruleCache.put(key, rule.action)
                 }
             }
         }
@@ -344,7 +354,7 @@ class OmniVpnService : VpnService() {
     private suspend fun handleGenericPacket(protocol: Int, sourceIp: InetAddress, destIp: InetAddress, sourcePort: Int, destPort: Int, direction: String?, packet: ByteBuffer, length: Int, uid: Int): Boolean {
         if (uid != -1) {
             val appInfo = getAppInfo(uid)
-            var hostname = destIp.hostAddress?.let { dnsCache[it] }
+            var hostname = destIp.hostAddress?.let { dnsCache.getIfPresent(it) }
 
             // Extract SNI domain from TCP port 443 packets
             if (protocol == 6 && destPort == 443) {
@@ -390,29 +400,29 @@ val targetIpString = targetIp.hostAddress ?: ""
 
             // Check UID rule
             val uidKey = "${TargetType.APPLICATION.name}:$uid"
-            if (ruleCache.containsKey(uidKey)) {
-                finalAction = ruleCache[uidKey]!!
+            if (ruleCache.asMap().containsKey(uidKey)) {
+                finalAction = ruleCache.getIfPresent(uidKey)!!
                 ruleApplied = true
             }
 
             // Check IP rule (overrides UID if more specific? let's say IP/Domain overrides UID)
             val ipKey = "${TargetType.IP_ADDRESS.name}:$targetIpString"
-            if (ruleCache.containsKey(ipKey)) {
-                finalAction = ruleCache[ipKey]!!
+            if (ruleCache.asMap().containsKey(ipKey)) {
+                finalAction = ruleCache.getIfPresent(ipKey)!!
                 ruleApplied = true
             }
 
             // Check Domain rule
             if (hostname != null) {
                 val domainKey = "${TargetType.DOMAIN.name}:$hostname"
-                if (ruleCache.containsKey(domainKey)) {
-                    finalAction = ruleCache[domainKey]!!
+                if (ruleCache.asMap().containsKey(domainKey)) {
+                    finalAction = ruleCache.getIfPresent(domainKey)!!
                     ruleApplied = true
                 } else if (hostname.startsWith("[SNI] ")) {
                     val rawDomain = hostname.substring(6)
                     val rawDomainKey = "${TargetType.DOMAIN.name}:$rawDomain"
-                    if (ruleCache.containsKey(rawDomainKey)) {
-                        finalAction = ruleCache[rawDomainKey]!!
+                    if (ruleCache.asMap().containsKey(rawDomainKey)) {
+                        finalAction = ruleCache.getIfPresent(rawDomainKey)!!
                         ruleApplied = true
                     }
                 }
@@ -430,7 +440,7 @@ val targetIpString = targetIp.hostAddress ?: ""
                     }
                     if (!bucket.consume()) {
                         // Rate limit exceeded, generate a FLAG rule if one doesn't exist
-                        if (!ruleCache.containsKey("${TargetType.APPLICATION.name}:$uid")) {
+                        if (!ruleCache.asMap().containsKey("${TargetType.APPLICATION.name}:$uid")) {
                             finalAction = Action.FLAG
                             ruleApplied = true
 
@@ -443,7 +453,7 @@ val targetIpString = targetIp.hostAddress ?: ""
                             }
 
                             // Update ruleCache
-                            ruleCache["${TargetType.APPLICATION.name}:$uid"] = Action.FLAG
+                            ruleCache.put("${TargetType.APPLICATION.name}:$uid", Action.FLAG)
 
                             // Send notification
                             val notificationManager = getSystemService(android.app.NotificationManager::class.java)
@@ -583,8 +593,8 @@ val targetIpString = targetIp.hostAddress ?: ""
     }
 
     private fun getAppInfo(uid: Int): Triple<String, String, Drawable?> {
-        if (appInfoCache.containsKey(uid)) {
-            return appInfoCache[uid]!!
+        if (appInfoCache.asMap().containsKey(uid)) {
+            return appInfoCache.getIfPresent(uid)!!
         }
 
         val pm = packageManager
@@ -606,8 +616,8 @@ val targetIpString = targetIp.hostAddress ?: ""
             info = Triple("Unknown (UID $uid)", "uid:$uid", null)
         }
 
-        appInfoCache[uid] = info
-        activeAppsFlow.value = appInfoCache.map { (uid, info) -> uid to info.first }
+        appInfoCache.put(uid, info)
+        activeAppsFlow.value = appInfoCache.asMap().map { (uid, info) -> uid to info.first }
         return info
     }
 
@@ -655,7 +665,7 @@ val targetIpString = targetIp.hostAddress ?: ""
                         if (domain != null) {
                             val resolvedIps = responseDnsPacket.getResolvedIps()
                             for (ip in resolvedIps) {
-                                dnsCache[ip] = domain
+                                dnsCache.put(ip, domain)
                             }
                         }
 
