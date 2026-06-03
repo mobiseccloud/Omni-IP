@@ -37,14 +37,6 @@ class DashboardViewModel(application: Application, private val savedStateHandle:
     fun executeAction(ip: String, action: String) {
         if (_isExecuting.value) return
 
-        if (action == "PORTSCAN_DEEP") {
-            val isPremium = NativeEngine.isPremiumUnlockedNative()
-            if (!isPremium) {
-                _showUpgradePrompt.value = true
-                return
-            }
-        }
-
         _isExecuting.value = true
         setTerminalOutput("")
 

@@ -9,6 +9,6 @@ object NativeEngine {
     external fun executeRawPing(target: String): String
     external fun executeLanSweep(subnet: String): String
     external fun executeTraceroute(target: String): String
-    external fun isPremiumUnlockedNative(): Boolean
+    external fun initializeNativeEnvironment(isDebug: Boolean)
     external fun setPremiumUnlockedNative(unlocked: Boolean)
 }

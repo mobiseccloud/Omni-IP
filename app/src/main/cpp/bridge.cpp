@@ -23,7 +23,9 @@
 
 std::mutex native_exec_mutex;
 
-bool g_premium_unlocked = false;
+static uint32_t g_auth_state = 0x00000000;
+const uint32_t FLAG_DEBUG = 0x1A2B3C4D;
+const uint32_t FLAG_PREMIUM = 0x9F8E7D6C;
 
 bool is_safe(const std::string& input) {
     for (char c : input) {
@@ -135,6 +137,13 @@ Java_com_mobisec_omniip_core_NativeEngine_executeNmapScan(
         return env->NewStringUTF("Error: Invalid characters in target string.");
     }
 
+    if (target_str.find("-p-") != std::string::npos || target_str.find("-A") != std::string::npos) {
+        if ((g_auth_state & FLAG_PREMIUM) == 0 && (g_auth_state & FLAG_DEBUG) == 0) {
+            env->ReleaseStringUTFChars(target, targetStr);
+            return env->NewStringUTF("Error: Premium entitlement required for deep scanning.");
+        }
+    }
+
 
     // As a demonstration for the prompt: "stream the matrix-green terminal output."
     // In a real device with nmap compiled, we would run nmap.
@@ -207,16 +216,23 @@ Java_com_mobisec_omniip_core_NativeEngine_executeTraceroute(
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_com_mobisec_omniip_core_NativeEngine_initializeNativeEnvironment(
+        JNIEnv* env,
+        jobject /* this */,
+        jboolean isDebug) {
+    if (isDebug) {
+        g_auth_state |= FLAG_DEBUG;
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_com_mobisec_omniip_core_NativeEngine_setPremiumUnlockedNative(
         JNIEnv* env,
         jobject /* this */,
         jboolean unlocked) {
-    g_premium_unlocked = unlocked;
-}
-
-extern "C" JNIEXPORT jboolean JNICALL
-Java_com_mobisec_omniip_core_NativeEngine_isPremiumUnlockedNative(
-        JNIEnv* env,
-        jobject /* this */) {
-    return g_premium_unlocked ? JNI_TRUE : JNI_FALSE;
+    if (unlocked) {
+        g_auth_state |= FLAG_PREMIUM;
+    } else {
+        g_auth_state &= ~FLAG_PREMIUM;
+    }
 }
