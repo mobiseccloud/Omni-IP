@@ -460,7 +460,7 @@ val targetIpString = targetIp.hostAddress ?: ""
                             val notification = androidx.core.app.NotificationCompat.Builder(this, channelId)
                                 .setContentTitle("Tactical Alert: Anomalous Behavior")
                                 .setContentText("App (UID: $uid) exceeded network threshold. Flagged automatically.")
-                                .setSmallIcon(android.R.drawable.ic_dialog_alert)
+                                .setSmallIcon(com.mobisec.omniip.R.drawable.ic_status_alert)
                                 .setContentIntent(pendingIntent)
                                 .setOnlyAlertOnce(true)
                                 .setAutoCancel(true)

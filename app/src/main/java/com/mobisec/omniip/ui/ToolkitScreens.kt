@@ -28,6 +28,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material3.Icon
+import androidx.compose.ui.res.painterResource
 import com.mobisec.omniip.ui.theme.AlertRed
 import com.mobisec.omniip.viewmodel.IpCalculatorViewModel
 import com.mobisec.omniip.viewmodel.IpConverterViewModel
@@ -56,7 +58,11 @@ fun PingScreen() {
     val coroutineScope = rememberCoroutineScope()
 
     Column(modifier = Modifier.fillMaxSize().background(PureBlack).padding(16.dp)) {
-        Text("PING MODULE", color = MatrixGreen, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(painter=painterResource(id=com.mobisec.omniip.R.drawable.ic_tactical_terminal), contentDescription=null, tint=MatrixGreen, modifier=Modifier.size(24.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("PING MODULE", color = MatrixGreen, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+        }
         Spacer(modifier = Modifier.height(16.dp))
         OutlinedTextField(
             value = target,
@@ -137,7 +143,11 @@ fun TracerouteScreen() {
     val coroutineScope = rememberCoroutineScope()
 
     Column(modifier = Modifier.fillMaxSize().background(PureBlack).padding(16.dp)) {
-        Text("TRACEROUTE MODULE", color = MatrixGreen, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(painter=painterResource(id=com.mobisec.omniip.R.drawable.ic_tactical_terminal), contentDescription=null, tint=MatrixGreen, modifier=Modifier.size(24.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("TRACEROUTE MODULE", color = MatrixGreen, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+        }
         Spacer(modifier = Modifier.height(16.dp))
         OutlinedTextField(
             value = target,
@@ -228,7 +238,11 @@ fun PortScannerScreen(onRequirePremium: () -> Unit = {}) {
         val coroutineScope = rememberCoroutineScope()
 
     Column(modifier = Modifier.fillMaxSize().background(PureBlack).padding(16.dp)) {
-        Text("PORT SCANNER MODULE", color = MatrixGreen, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(painter=painterResource(id=com.mobisec.omniip.R.drawable.ic_recon_crosshair), contentDescription=null, tint=MatrixGreen, modifier=Modifier.size(24.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("PORT SCANNER MODULE", color = MatrixGreen, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+        }
         Spacer(modifier = Modifier.height(16.dp))
         OutlinedTextField(
             value = target,
@@ -367,7 +381,11 @@ fun ConnectionLogScreen(viewModel: ConnectionLogViewModel = viewModel()) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text(log.appName, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                            Text(log.action, color = textColor, fontWeight = FontWeight.Bold)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(log.action, color = textColor, fontWeight = FontWeight.Bold)
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Icon(painter=painterResource(id=com.mobisec.omniip.R.drawable.ic_firewall_block), contentDescription=null, tint=textColor, modifier=Modifier.size(24.dp))
+                            }
                         }
                         Spacer(modifier = Modifier.height(4.dp))
                         Text("${log.destIp}:${log.destPort}", color = textColor, fontSize = 14.sp)
