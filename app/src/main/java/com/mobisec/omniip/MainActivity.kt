@@ -103,7 +103,7 @@ class MainActivity : ComponentActivity() {
                     var currentTab by remember { mutableStateOf(0) }
                     var targetIp by remember { mutableStateOf("") }
                     var initialAction by remember { mutableStateOf("NONE") }
-                    val mainTabs = listOf("Telemetry", "Firewall Matrix", "Threat Feeds", "Scanner", "Dashboard")
+                    val mainTabs = listOf("Telemetry", "Firewall Matrix", "Threat Feeds", "Scanner", "Dashboard", "Toolkit")
 
                     Column(modifier = Modifier.fillMaxSize()) {
                         TopBar(
@@ -137,7 +137,7 @@ class MainActivity : ComponentActivity() {
                                 initialAction = action
                                 currentTab = 4 // Navigate to Dashboard
                             }
-                        } else {
+                        } else if (currentTab == 4) {
                             val terminalOutput by dashboardViewModel.terminalOutput.collectAsState()
                             val isExecuting by dashboardViewModel.isExecuting.collectAsState()
                             val showUpgradePrompt by dashboardViewModel.showUpgradePrompt.collectAsState()
@@ -145,8 +145,8 @@ class MainActivity : ComponentActivity() {
                             if (showUpgradePrompt) {
                                 AlertDialog(
                                     onDismissRequest = { dashboardViewModel.dismissUpgradePrompt() },
-                                    title = { Text("Premium Feature Locked") },
-                                    text = { Text("Deep scanning with Nmap (-p- -A) requires a premium entitlement. Upgrade now to unlock advanced tactical capabilities.") },
+                                    title = { Text("Premium Feature") },
+                                    text = { Text("Port scanning is a premium feature. Upgrade to unlock.") },
                                     confirmButton = {
                                         Button(onClick = {
                                             dashboardViewModel.dismissUpgradePrompt()
@@ -165,6 +165,8 @@ class MainActivity : ComponentActivity() {
                                 isExecuting = isExecuting,
                                 onExecuteAction = { ip, action -> dashboardViewModel.executeAction(ip, action) }
                             )
+                        } else if (currentTab == 5) {
+                            com.mobisec.omniip.ui.ToolkitNavHost()
                         }
                     }
                 }

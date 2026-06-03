@@ -12,7 +12,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.OmniIP">
         <activity
-            android:name=".MainActivity"
+            android:name=".SplashActivity"
             android:exported="true"
             android:theme="@style/Theme.OmniIP">
             <intent-filter>
@@ -20,6 +20,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".DocumentViewerActivity"
+            android:exported="true"
+            android:theme="@style/Theme.OmniIP" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.OmniIP" />
 
         <service
             android:name=".vpn.OmniVpnService"
