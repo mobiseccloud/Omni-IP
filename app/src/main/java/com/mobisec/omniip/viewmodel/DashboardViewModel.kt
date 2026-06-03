@@ -10,9 +10,15 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
-class DashboardViewModel(application: Application) : AndroidViewModel(application) {
-    private val _terminalOutput = MutableStateFlow("")
-    val terminalOutput: StateFlow<String> = _terminalOutput
+import androidx.lifecycle.SavedStateHandle
+
+class DashboardViewModel(application: Application, private val savedStateHandle: SavedStateHandle) : AndroidViewModel(application) {
+    private val TERMINAL_OUTPUT_KEY = "terminal_output"
+    val terminalOutput: StateFlow<String> = savedStateHandle.getStateFlow(TERMINAL_OUTPUT_KEY, "")
+
+    private fun setTerminalOutput(output: String) {
+        savedStateHandle[TERMINAL_OUTPUT_KEY] = output
+    }
 
     private val _isExecuting = MutableStateFlow(false)
     val isExecuting: StateFlow<Boolean> = _isExecuting
@@ -40,7 +46,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         }
 
         _isExecuting.value = true
-        _terminalOutput.value = ""
+        setTerminalOutput("")
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
@@ -56,9 +62,9 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
                     }
                     else -> "Unknown action."
                 }
-                _terminalOutput.value = output
+                setTerminalOutput(output)
             } catch (e: Exception) {
-                _terminalOutput.value = "Error executing action: ${e.message}"
+                setTerminalOutput("Error executing action: ${e.message}")
             } finally {
                 _isExecuting.value = false
             }
