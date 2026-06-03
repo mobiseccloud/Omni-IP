@@ -17,6 +17,7 @@ import androidx.compose.ui.Alignment
 import com.mobisec.omniip.ui.theme.AlertRed
 import androidx.compose.animation.core.*
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(
     targetIp: String,
@@ -25,11 +26,16 @@ fun DashboardScreen(
     isExecuting: Boolean,
     isRecording: Boolean,
     pcapSize: Long,
+    targetName: String,
+    rxBytes: Long,
+    txBytes: Long,
+    activeApps: List<Pair<Int, String>>,
     onExecuteAction: (String, String) -> Unit, // (ip, actionName)
-    onToggleRecording: (Boolean) -> Unit
+    onToggleRecording: (Boolean, Int?) -> Unit
 ) {
     var ipInput by remember { mutableStateOf(targetIp) }
     var actionInput by remember { mutableStateOf(initialAction) }
+    var showAppSelectionSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(initialAction, targetIp) {
         if (targetIp.isNotEmpty() && initialAction.isNotEmpty() && initialAction != "NONE") {
@@ -50,7 +56,23 @@ fun DashboardScreen(
     )
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                Row(
+        if (isRecording) {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("ACTIVE RECORDING", color = AlertRed, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text("TARGET: $targetName", color = MatrixGreen, fontSize = 14.sp)
+                    val sizeMb = pcapSize / (1024.0 * 1024.0)
+                    Text("PCAP SIZE: ${String.format("%.2f MB", sizeMb)}", color = MatrixGreen, fontSize = 14.sp)
+                    Text("RX: $rxBytes Bytes | TX: $txBytes Bytes", color = TacticalAmber, fontSize = 14.sp)
+                }
+            }
+        }
+
+        Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
@@ -59,16 +81,19 @@ fun DashboardScreen(
 
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (isRecording) {
-                    val sizeMb = pcapSize / (1024.0 * 1024.0)
-                    Text(String.format("%.2f MB", sizeMb), color = MatrixGreen, fontSize = 14.sp)
-                    Spacer(modifier = Modifier.width(8.dp))
                     Box(modifier = Modifier.size(12.dp).background(AlertRed.copy(alpha = pulseAlpha), shape = androidx.compose.foundation.shape.CircleShape))
                     Spacer(modifier = Modifier.width(8.dp))
                 }
 
                 Switch(
                     checked = isRecording,
-                    onCheckedChange = { onToggleRecording(it) },
+                    onCheckedChange = {
+                        if (it) {
+                            showAppSelectionSheet = true
+                        } else {
+                            onToggleRecording(false, null)
+                        }
+                    },
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = AlertRed,
                         checkedTrackColor = AlertRed.copy(alpha = 0.5f),
@@ -137,6 +162,47 @@ fun DashboardScreen(
                 fontSize = 12.sp,
                 modifier = Modifier.verticalScroll(rememberScrollState())
             )
+        }
+    }
+
+    if (showAppSelectionSheet) {
+        ModalBottomSheet(onDismissRequest = { showAppSelectionSheet = false }) {
+            Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                Text("Select Target for Capture", fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = 18.sp, color = MatrixGreen)
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Button(
+                    onClick = {
+                        showAppSelectionSheet = false
+                        onToggleRecording(true, null)
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text("All Traffic (Global)")
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                androidx.compose.material3.HorizontalDivider(color = Color.Gray)
+                Spacer(modifier = Modifier.height(8.dp))
+
+                androidx.compose.foundation.lazy.LazyColumn {
+                    items(activeApps.size) { index ->
+                        val app = activeApps[index]
+                        Button(
+                            onClick = {
+                                showAppSelectionSheet = false
+                                onToggleRecording(true, app.first)
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                        ) {
+                            Text(app.second, color = MatrixGreen)
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(24.dp))
+            }
         }
     }
 }

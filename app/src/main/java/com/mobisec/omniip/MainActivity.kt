@@ -73,6 +73,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private var pendingRecordUid: Int? = null
+
     private val pcapCreateFileLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.tcpdump.pcap")) { uri ->
         if (uri != null) {
             lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
@@ -82,6 +84,15 @@ class MainActivity : ComponentActivity() {
                         val writer = PcapWriter(pfd)
                         writer.initialize()
                         OmniVpnService.activePcapWriter = writer
+
+                        OmniVpnService.targetRecordUid = pendingRecordUid
+                        if (pendingRecordUid != null) {
+                            OmniVpnService.exfiltrationTracker.remove(pendingRecordUid)
+                        } else {
+                            OmniVpnService.exfiltrationTracker.clear()
+                        }
+                        OmniVpnService.currentTargetMetricsFlow.value = OmniVpnService.ExfiltrationMetrics()
+
                         OmniVpnService.isPcapRecordingFlow.value = true
                         OmniVpnService.pcapFileSizeFlow.value = 24 // Global header size
                     }
@@ -92,7 +103,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun startPcapRecording() {
+    private fun startPcapRecording(targetUid: Int?) {
+        pendingRecordUid = targetUid
         val fileName = "omni_ip_capture_${System.currentTimeMillis()}.pcap"
         pcapCreateFileLauncher.launch(fileName)
     }
@@ -192,8 +204,14 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
 
-                                                        val isRecording by OmniVpnService.isPcapRecordingFlow.collectAsState()
+                            val isRecording by OmniVpnService.isPcapRecordingFlow.collectAsState()
                             val pcapSize by OmniVpnService.pcapFileSizeFlow.collectAsState()
+                            val targetUid = OmniVpnService.targetRecordUid
+                            val appInfo = targetUid?.let { OmniVpnService.appInfoCache[it] }
+                            val targetName = if (targetUid == null) "All Traffic" else (appInfo?.first ?: "Unknown App")
+                            val metrics by OmniVpnService.currentTargetMetricsFlow.collectAsState()
+                            val activeApps by OmniVpnService.activeAppsFlow.collectAsState()
+
                             DashboardScreen(
                                 targetIp = targetIp,
                                 initialAction = initialAction,
@@ -201,10 +219,14 @@ class MainActivity : ComponentActivity() {
                                 isExecuting = isExecuting,
                                 isRecording = isRecording,
                                 pcapSize = pcapSize,
+                                targetName = targetName,
+                                rxBytes = metrics.rxBytes,
+                                txBytes = metrics.txBytes,
+                                activeApps = activeApps,
                                 onExecuteAction = { ip, action -> dashboardViewModel.executeAction(ip, action) },
-                                onToggleRecording = { start ->
+                                onToggleRecording = { start, uid ->
                                     if (start) {
-                                        startPcapRecording()
+                                        startPcapRecording(uid)
                                     } else {
                                         stopPcapRecording()
                                     }
