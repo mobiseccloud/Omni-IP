@@ -75,6 +75,8 @@ class OmniVpnService : VpnService() {
         }
     }
 
+    class ExfiltrationMetrics(var txBytes: Long = 0L, var rxBytes: Long = 0L)
+
     companion object {
         private const val TAG = "OmniVpnService"
 
@@ -82,6 +84,12 @@ class OmniVpnService : VpnService() {
         var activePcapWriter: PcapWriter? = null
         var pcapFileSizeFlow = kotlinx.coroutines.flow.MutableStateFlow(0L)
         var isPcapRecordingFlow = kotlinx.coroutines.flow.MutableStateFlow(false)
+
+        var targetRecordUid: Int? = null
+        val exfiltrationTracker = ConcurrentHashMap<Int, ExfiltrationMetrics>()
+        var activeAppsFlow = kotlinx.coroutines.flow.MutableStateFlow<List<Pair<Int, String>>>(emptyList())
+        val appInfoCache = ConcurrentHashMap<Int, Triple<String, String, Drawable?>>()
+        var currentTargetMetricsFlow = kotlinx.coroutines.flow.MutableStateFlow(ExfiltrationMetrics())
 
         private val _telemetryFlow = MutableSharedFlow<ConnectionTelemetry>(extraBufferCapacity = 100)
         val telemetryFlow = _telemetryFlow.asSharedFlow()
@@ -106,7 +114,22 @@ class OmniVpnService : VpnService() {
             }
         }
 
-                scope.launch(Dispatchers.IO) {
+        scope.launch(Dispatchers.IO) {
+            while (isActive) {
+                if (isPcapRecordingFlow.value) {
+                    val targetUid = targetRecordUid
+                    if (targetUid != null) {
+                        val metrics = exfiltrationTracker[targetUid]
+                        if (metrics != null) {
+                            currentTargetMetricsFlow.value = ExfiltrationMetrics(metrics.txBytes, metrics.rxBytes)
+                        }
+                    }
+                }
+                delay(1000)
+            }
+        }
+
+        scope.launch(Dispatchers.IO) {
             AppDatabase.getDatabase(this@OmniVpnService).firewallRuleDao().getAllRules().collect { rules ->
                 ruleCache.clear()
                 for (rule in rules) {
@@ -209,35 +232,52 @@ class OmniVpnService : VpnService() {
         val version = (packet.get(0).toInt() shr 4) and 0x0F
         if (version != 4) return // Only handle IPv4 for now
 
-        // Extract packet to write to PCAP
-        val packetData = ByteArray(length)
-        packet.position(0)
-        packet.get(packetData)
-        packet.position(0) // Reset position for further processing
-
-        activePcapWriter?.let {
-            it.writePacket(packetData, length)
-            pcapFileSizeFlow.value += length + 16 // 16 bytes for pcap packet header
-        }
-
         val protocol = PacketUtils.getProtocol(packet)
         val ihl = PacketUtils.getIHL(packet)
         val sourceIp = PacketUtils.getSourceIP(packet)
         val destIp = PacketUtils.getDestIP(packet)
 
-        if (protocol == 17) { // UDP
-            val sourcePort = PacketUtils.getSourcePort(packet, ihl)
-            val destPort = PacketUtils.getDestPort(packet, ihl)
+        var sourcePort = 0
+        var destPort = 0
+        if (protocol == 17 || protocol == 6) {
+            sourcePort = PacketUtils.getSourcePort(packet, ihl)
+            destPort = PacketUtils.getDestPort(packet, ihl)
+        }
 
+        val uid = resolveUid(protocol, sourceIp, sourcePort, destIp, destPort)
+
+        // Exfiltration Accounting
+        if (uid != -1) {
+            val metrics = exfiltrationTracker.getOrPut(uid) { ExfiltrationMetrics() }
+            if (sourceIp.hostAddress == "10.0.0.2") {
+                metrics.txBytes += length // Outbound
+            } else if (destIp.hostAddress == "10.0.0.2") {
+                metrics.rxBytes += length // Inbound
+            }
+        }
+
+        // Targeted PCAP Filtering
+        val targetUid = targetRecordUid
+        if (targetUid == null || targetUid == uid) {
+            // Extract packet to write to PCAP
+            val packetData = ByteArray(length)
+            packet.position(0)
+            packet.get(packetData)
+            packet.position(0) // Reset position for further processing
+
+            activePcapWriter?.let {
+                it.writePacket(packetData, length)
+                pcapFileSizeFlow.value += length + 16 // 16 bytes for pcap packet header
+            }
+        }
+
+        if (protocol == 17) { // UDP
             if (destPort == 53) {
-                handleDnsRequest(packet, length, ihl, sourceIp, destIp, sourcePort, outputStream)
+                handleDnsRequest(packet, length, ihl, sourceIp, destIp, sourcePort, outputStream, uid)
             } else {
-                handleGenericPacket(protocol, sourceIp, destIp, sourcePort, destPort, null, packet, length, outputStream)
+                handleGenericPacket(protocol, sourceIp, destIp, sourcePort, destPort, null, packet, length, outputStream, uid)
             }
         } else if (protocol == 6) { // TCP
-            val sourcePort = PacketUtils.getSourcePort(packet, ihl)
-            val destPort = PacketUtils.getDestPort(packet, ihl)
-
             var direction: String? = null
             if (PacketUtils.isTcpSyn(packet, ihl)) {
                 if (sourceIp.hostAddress == "10.0.0.2") {
@@ -247,12 +287,11 @@ class OmniVpnService : VpnService() {
                 }
             }
 
-            handleGenericPacket(protocol, sourceIp, destIp, sourcePort, destPort, direction, packet, length, outputStream)
+            handleGenericPacket(protocol, sourceIp, destIp, sourcePort, destPort, direction, packet, length, outputStream, uid)
         }
     }
 
-    private suspend fun handleGenericPacket(protocol: Int, sourceIp: InetAddress, destIp: InetAddress, sourcePort: Int, destPort: Int, direction: String?, packet: ByteBuffer, length: Int, outputStream: FileOutputStream) {
-        val uid = resolveUid(protocol, sourceIp, sourcePort, destIp, destPort)
+    private suspend fun handleGenericPacket(protocol: Int, sourceIp: InetAddress, destIp: InetAddress, sourcePort: Int, destPort: Int, direction: String?, packet: ByteBuffer, length: Int, outputStream: FileOutputStream, uid: Int) {
         if (uid != -1) {
             val appInfo = getAppInfo(uid)
             val hostname = destIp.hostAddress?.let { dnsCache[it] }
@@ -452,8 +491,14 @@ val targetIpString = targetIp.hostAddress ?: ""
     }
 
     private fun getAppInfo(uid: Int): Triple<String, String, Drawable?> {
+        if (appInfoCache.containsKey(uid)) {
+            return appInfoCache[uid]!!
+        }
+
         val pm = packageManager
         val packages = pm.getPackagesForUid(uid)
+
+        var info: Triple<String, String, Drawable?>
 
         if (!packages.isNullOrEmpty()) {
             val packageName = packages[0]
@@ -461,15 +506,20 @@ val targetIpString = targetIp.hostAddress ?: ""
                 val appInfo = pm.getApplicationInfo(packageName, 0)
                 val appName = pm.getApplicationLabel(appInfo).toString()
                 val icon = pm.getApplicationIcon(appInfo)
-                return Triple(appName, packageName, icon)
+                info = Triple(appName, packageName, icon)
             } catch (e: PackageManager.NameNotFoundException) {
-                return Triple("Unknown ($packageName)", packageName, null)
+                info = Triple("Unknown ($packageName)", packageName, null)
             }
+        } else {
+            info = Triple("Unknown (UID $uid)", "uid:$uid", null)
         }
-        return Triple("Unknown (UID $uid)", "uid:$uid", null)
+
+        appInfoCache[uid] = info
+        activeAppsFlow.value = appInfoCache.map { (uid, info) -> uid to info.first }
+        return info
     }
 
-    private fun handleDnsRequest(packet: ByteBuffer, length: Int, ihl: Int, sourceIp: InetAddress, destIp: InetAddress, sourcePort: Int, outputStream: FileOutputStream) {
+    private fun handleDnsRequest(packet: ByteBuffer, length: Int, ihl: Int, sourceIp: InetAddress, destIp: InetAddress, sourcePort: Int, outputStream: FileOutputStream, uid: Int) {
         val udpHeaderLength = 8
         val payloadOffset = ihl + udpHeaderLength
         val payloadLength = length - payloadOffset
