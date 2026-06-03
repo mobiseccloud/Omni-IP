@@ -4,6 +4,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.drawable.Drawable
 import android.net.VpnService
+import android.net.Uri
+import kotlinx.coroutines.delay
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.util.Log
@@ -75,6 +77,11 @@ class OmniVpnService : VpnService() {
 
     companion object {
         private const val TAG = "OmniVpnService"
+
+        // Pcap Integration
+        var activePcapWriter: PcapWriter? = null
+        var pcapFileSizeFlow = kotlinx.coroutines.flow.MutableStateFlow(0L)
+        var isPcapRecordingFlow = kotlinx.coroutines.flow.MutableStateFlow(false)
 
         private val _telemetryFlow = MutableSharedFlow<ConnectionTelemetry>(extraBufferCapacity = 100)
         val telemetryFlow = _telemetryFlow.asSharedFlow()
@@ -201,6 +208,17 @@ class OmniVpnService : VpnService() {
         if (length < 20) return // Min IPv4 header length
         val version = (packet.get(0).toInt() shr 4) and 0x0F
         if (version != 4) return // Only handle IPv4 for now
+
+        // Extract packet to write to PCAP
+        val packetData = ByteArray(length)
+        packet.position(0)
+        packet.get(packetData)
+        packet.position(0) // Reset position for further processing
+
+        activePcapWriter?.let {
+            it.writePacket(packetData, length)
+            pcapFileSizeFlow.value += length + 16 // 16 bytes for pcap packet header
+        }
 
         val protocol = PacketUtils.getProtocol(packet)
         val ihl = PacketUtils.getIHL(packet)

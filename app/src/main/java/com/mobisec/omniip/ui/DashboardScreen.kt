@@ -13,6 +13,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.mobisec.omniip.ui.theme.MatrixGreen
 import com.mobisec.omniip.ui.theme.TacticalAmber
+import androidx.compose.ui.Alignment
+import com.mobisec.omniip.ui.theme.AlertRed
+import androidx.compose.animation.core.*
 
 @Composable
 fun DashboardScreen(
@@ -20,7 +23,10 @@ fun DashboardScreen(
     initialAction: String,
     terminalOutput: String,
     isExecuting: Boolean,
-    onExecuteAction: (String, String) -> Unit // (ip, actionName)
+    isRecording: Boolean,
+    pcapSize: Long,
+    onExecuteAction: (String, String) -> Unit, // (ip, actionName)
+    onToggleRecording: (Boolean) -> Unit
 ) {
     var ipInput by remember { mutableStateOf(targetIp) }
     var actionInput by remember { mutableStateOf(initialAction) }
@@ -33,8 +39,47 @@ fun DashboardScreen(
         }
     }
 
+    val infiniteTransition = rememberInfiniteTransition()
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0.2f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        )
+    )
+
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-        Text("DASHBOARD", color = MatrixGreen, fontSize = 20.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("DASHBOARD", color = MatrixGreen, fontSize = 20.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (isRecording) {
+                    val sizeMb = pcapSize / (1024.0 * 1024.0)
+                    Text(String.format("%.2f MB", sizeMb), color = MatrixGreen, fontSize = 14.sp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Box(modifier = Modifier.size(12.dp).background(AlertRed.copy(alpha = pulseAlpha), shape = androidx.compose.foundation.shape.CircleShape))
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+
+                Switch(
+                    checked = isRecording,
+                    onCheckedChange = { onToggleRecording(it) },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = AlertRed,
+                        checkedTrackColor = AlertRed.copy(alpha = 0.5f),
+                        uncheckedThumbColor = Color.Gray,
+                        uncheckedTrackColor = Color.DarkGray
+                    )
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Record Traffic", color = if (isRecording) AlertRed else Color.Gray, fontSize = 14.sp)
+            }
+        }
         Spacer(modifier = Modifier.height(16.dp))
 
         OutlinedTextField(

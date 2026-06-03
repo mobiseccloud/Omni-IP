@@ -49,6 +49,8 @@ import com.mobisec.omniip.viewmodel.LanScannerViewModel
 import com.mobisec.omniip.viewmodel.DashboardViewModel
 
 import com.mobisec.omniip.vpn.OmniVpnService
+import com.mobisec.omniip.vpn.PcapWriter
+import kotlinx.coroutines.launch
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.Constraints
@@ -68,6 +70,38 @@ class MainActivity : ComponentActivity() {
         if (result.resultCode == Activity.RESULT_OK) {
             val intent = Intent(this, OmniVpnService::class.java)
             startService(intent)
+        }
+    }
+
+    private val pcapCreateFileLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.tcpdump.pcap")) { uri ->
+        if (uri != null) {
+            lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    val pfd = contentResolver.openFileDescriptor(uri, "w")
+                    if (pfd != null) {
+                        val writer = PcapWriter(pfd)
+                        writer.initialize()
+                        OmniVpnService.activePcapWriter = writer
+                        OmniVpnService.isPcapRecordingFlow.value = true
+                        OmniVpnService.pcapFileSizeFlow.value = 24 // Global header size
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        }
+    }
+
+    private fun startPcapRecording() {
+        val fileName = "omni_ip_capture_${System.currentTimeMillis()}.pcap"
+        pcapCreateFileLauncher.launch(fileName)
+    }
+
+    private fun stopPcapRecording() {
+        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            OmniVpnService.isPcapRecordingFlow.value = false
+            OmniVpnService.activePcapWriter?.close()
+            OmniVpnService.activePcapWriter = null
         }
     }
 
@@ -158,12 +192,23 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
 
+                                                        val isRecording by OmniVpnService.isPcapRecordingFlow.collectAsState()
+                            val pcapSize by OmniVpnService.pcapFileSizeFlow.collectAsState()
                             DashboardScreen(
                                 targetIp = targetIp,
                                 initialAction = initialAction,
                                 terminalOutput = terminalOutput,
                                 isExecuting = isExecuting,
-                                onExecuteAction = { ip, action -> dashboardViewModel.executeAction(ip, action) }
+                                isRecording = isRecording,
+                                pcapSize = pcapSize,
+                                onExecuteAction = { ip, action -> dashboardViewModel.executeAction(ip, action) },
+                                onToggleRecording = { start ->
+                                    if (start) {
+                                        startPcapRecording()
+                                    } else {
+                                        stopPcapRecording()
+                                    }
+                                }
                             )
                         } else if (currentTab == 5) {
                             com.mobisec.omniip.ui.ToolkitNavHost()
