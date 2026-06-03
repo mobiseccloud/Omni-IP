@@ -95,18 +95,7 @@ class SplashActivity : ComponentActivity() {
 
 @Composable
 fun FullScreenTermsModal(onAgree: () -> Unit) {
-    val context = LocalContext.current
-    var termsText by remember { mutableStateOf("Loading terms...") }
-
-    LaunchedEffect(Unit) {
-        termsText = try {
-            context.assets.open("docs/VpnServiceDisclosure.md").use {
-                java.io.InputStreamReader(it).readText()
-            }
-        } catch (e: Exception) {
-            "Error loading terms."
-        }
-    }
+    val termsText = "Omni-IP uses the Android VpnService to establish a local loopback interface for on-device firewalling and packet forensics. Your traffic never leaves the device. We do not collect, transmit, or log your network data remotely."
 
     Box(
         modifier = Modifier

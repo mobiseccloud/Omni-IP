@@ -29,14 +29,30 @@ object IPPacketBuilder {
         buffer.putShort(10, calculateChecksum(packet, 0, 20))
 
         // UDP Header
+        val udpLength = 8 + payload.size
         buffer.position(20)
         buffer.putShort(sourcePort.toShort())
         buffer.putShort(destPort.toShort())
-        buffer.putShort((8 + payload.size).toShort())
-        buffer.putShort(0) // UDP Checksum (optional, 0 = disabled)
+        buffer.putShort(udpLength.toShort())
+        buffer.putShort(0) // UDP Checksum (placeholder)
 
         // Payload
         buffer.put(payload)
+
+        // Calculate UDP checksum (including IPv4 pseudo-header)
+        val pseudoHeader = ByteBuffer.allocate(12 + udpLength)
+        pseudoHeader.put(sourceIp.address)
+        pseudoHeader.put(destIp.address)
+        pseudoHeader.put(0.toByte())
+        pseudoHeader.put(17.toByte()) // Protocol UDP
+        pseudoHeader.putShort(udpLength.toShort())
+        pseudoHeader.put(packet, 20, udpLength)
+
+        var udpChecksum = calculateChecksum(pseudoHeader.array(), 0, pseudoHeader.capacity())
+        if (udpChecksum.toInt() == 0) {
+            udpChecksum = 0xFFFF.toShort()
+        }
+        buffer.putShort(26, udpChecksum)
 
         return packet
     }

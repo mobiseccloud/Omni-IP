@@ -1,6 +1,7 @@
 package com.mobisec.omniip
 
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.net.VpnService
 import android.os.Bundle
@@ -299,6 +300,13 @@ class MainActivity : ComponentActivity() {
 
 
     private fun startVpn() {
+        val sharedPrefs = getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        val hasAgreed = sharedPrefs.getBoolean("has_agreed_to_terms", false)
+        if (!hasAgreed) {
+            // Cannot start VPN if user hasn't agreed to terms
+            return
+        }
+
         val intent = VpnService.prepare(this)
         if (intent != null) {
             vpnServiceLauncher.launch(intent)
