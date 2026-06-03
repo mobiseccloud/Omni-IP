@@ -233,7 +233,7 @@ class MainActivity : ComponentActivity() {
                                 }
                             )
                         } else if (currentTab == 5) {
-                            com.mobisec.omniip.ui.ToolkitNavHost()
+                            com.mobisec.omniip.ui.ToolkitNavHost(onRequirePremium = { dashboardViewModel.triggerUpgradePrompt() })
                         }
                     }
                 }

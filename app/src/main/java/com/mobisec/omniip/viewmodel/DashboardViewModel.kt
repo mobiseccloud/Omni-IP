@@ -20,6 +20,10 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
     private val _showUpgradePrompt = MutableStateFlow(false)
     val showUpgradePrompt: StateFlow<Boolean> = _showUpgradePrompt
 
+    fun triggerUpgradePrompt() {
+        _showUpgradePrompt.value = true
+    }
+
     fun dismissUpgradePrompt() {
         _showUpgradePrompt.value = false
     }

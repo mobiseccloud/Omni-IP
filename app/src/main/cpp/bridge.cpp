@@ -15,6 +15,9 @@
 #include <stdlib.h>
 #include <ctype.h>
 
+
+bool g_premium_unlocked = false;
+
 bool is_safe(const std::string& input) {
     for (char c : input) {
         if (!isalnum(c) && c != '.' && c != ':' && c != '-' && c != ' ') {
@@ -125,13 +128,17 @@ Java_com_mobisec_omniip_core_NativeEngine_executeTraceroute(
     return env->NewStringUTF(result.c_str());
 }
 
+extern "C" JNIEXPORT void JNICALL
+Java_com_mobisec_omniip_core_NativeEngine_setPremiumUnlockedNative(
+        JNIEnv* env,
+        jobject /* this */,
+        jboolean unlocked) {
+    g_premium_unlocked = unlocked;
+}
+
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_mobisec_omniip_core_NativeEngine_isPremiumUnlockedNative(
         JNIEnv* env,
         jobject /* this */) {
-#ifdef PREMIUM_UNLOCKED
-    return JNI_TRUE;
-#else
-    return JNI_FALSE;
-#endif
+    return g_premium_unlocked ? JNI_TRUE : JNI_FALSE;
 }

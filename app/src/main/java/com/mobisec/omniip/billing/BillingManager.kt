@@ -6,6 +6,7 @@ import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.android.billingclient.api.*
+import com.mobisec.omniip.core.NativeEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -61,6 +62,9 @@ class BillingManager(private val context: Context, private val coroutineScope: C
     private var productDetailsList: List<ProductDetails> = emptyList()
 
     init {
+        if (sharedPrefs.getBoolean(KEY_IS_PREMIUM, false) || sharedPrefs.getBoolean(KEY_IS_ENTERPRISE, false)) {
+            NativeEngine.setPremiumUnlockedNative(true)
+        }
         connectToBillingService()
     }
 
@@ -157,6 +161,7 @@ class BillingManager(private val context: Context, private val coroutineScope: C
         }
         if (hasChanges) {
             editor.apply()
+            NativeEngine.setPremiumUnlockedNative(true)
         }
     }
 
