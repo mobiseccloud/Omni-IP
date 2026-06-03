@@ -20,6 +20,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -87,9 +88,9 @@ class MainActivity : ComponentActivity() {
 
                         OmniVpnService.targetRecordUid = pendingRecordUid
                         if (pendingRecordUid != null) {
-                            OmniVpnService.exfiltrationTracker.remove(pendingRecordUid)
+                            OmniVpnService.exfiltrationTracker.invalidate(pendingRecordUid!!)
                         } else {
-                            OmniVpnService.exfiltrationTracker.clear()
+                            OmniVpnService.exfiltrationTracker.invalidateAll()
                         }
                         OmniVpnService.currentTargetMetricsFlow.value = OmniVpnService.ExfiltrationMetrics()
 
@@ -120,10 +121,13 @@ class MainActivity : ComponentActivity() {
     private val rulesViewModel: RulesViewModel by viewModels()
         val lanScannerViewModel: LanScannerViewModel by viewModels()
         val dashboardViewModel: DashboardViewModel by viewModels()
+        val initViewModel: com.mobisec.omniip.viewmodel.InitViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         billingManager = BillingManager(this, lifecycleScope)
+
+        initViewModel.startInitialization()
 
         // Schedule Threat Feed Worker
         val constraints = Constraints.Builder()
@@ -142,16 +146,34 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             OmniIPTheme {
+                val isInitialized by initViewModel.isInitialized.collectAsState()
+                val initStatus by initViewModel.initStatus.collectAsState()
+
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    var currentTab by remember { mutableStateOf(0) }
-                    var targetIp by remember { mutableStateOf("") }
-                    var initialAction by remember { mutableStateOf("NONE") }
-                    val mainTabs = listOf("Telemetry", "Firewall Matrix", "Threat Feeds", "Scanner", "Dashboard", "Toolkit")
+                    if (!isInitialized) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "> ${initStatus}_",
+                                color = MatrixGreen,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                                fontSize = 18.sp
+                            )
+                        }
+                    } else {
+                        var currentTab by remember { mutableStateOf(0) }
+                        var targetIp by remember { mutableStateOf("") }
+                        var initialAction by remember { mutableStateOf("NONE") }
+                        val mainTabs = listOf("Telemetry", "Firewall Matrix", "Threat Feeds", "Scanner", "Dashboard", "Toolkit")
 
-                    Column(modifier = Modifier.fillMaxSize()) {
+                        Column(modifier = Modifier.fillMaxSize()) {
                         TopBar(
                             onStartVpn = { startVpn() },
                             onStopVpn = { stopVpn() }
@@ -232,8 +254,9 @@ class MainActivity : ComponentActivity() {
                                     }
                                 }
                             )
-                        } else if (currentTab == 5) {
-                            com.mobisec.omniip.ui.ToolkitNavHost(onRequirePremium = { dashboardViewModel.triggerUpgradePrompt() })
+                            } else if (currentTab == 5) {
+                                com.mobisec.omniip.ui.ToolkitNavHost(onRequirePremium = { dashboardViewModel.triggerUpgradePrompt() })
+                            }
                         }
                     }
                 }
