@@ -124,3 +124,14 @@ Java_com_mobisec_omniip_core_NativeEngine_executeTraceroute(
     env->ReleaseStringUTFChars(target, targetStr);
     return env->NewStringUTF(result.c_str());
 }
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_mobisec_omniip_core_NativeEngine_isPremiumUnlockedNative(
+        JNIEnv* env,
+        jobject /* this */) {
+#ifdef PREMIUM_UNLOCKED
+    return JNI_TRUE;
+#else
+    return JNI_FALSE;
+#endif
+}

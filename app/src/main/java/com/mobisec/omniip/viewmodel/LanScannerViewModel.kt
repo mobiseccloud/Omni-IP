@@ -94,22 +94,28 @@ private var ouiMap: Map<String, String>? = null
         if (ouiMap == null) {
             val map = mutableMapOf<String, String>()
             try {
-                val inputStream = getApplication<Application>().assets.open("oui.txt")
-                val reader = BufferedReader(InputStreamReader(inputStream))
-                var line: String?
-                while (reader.readLine().also { line = it } != null) {
-                    if (line!!.contains("(hex)")) {
-                        val parts = line!!.split("(hex)")
-                        if (parts.size > 1) {
-                            map[parts[0].trim()] = parts[1].trim()
+                val file = File(getApplication<Application>().filesDir, "oui.txt")
+                if (!file.exists()) {
+                    return "Unknown"
+                }
+                BufferedReader(FileReader(file)).use { reader ->
+                    var line: String?
+                    while (reader.readLine().also { line = it } != null) {
+                        if (line!!.contains("(hex)")) {
+                            val parts = line!!.split("(hex)")
+                            if (parts.size > 1) {
+                                map[parts[0].trim()] = parts[1].trim()
+                            }
                         }
                     }
                 }
-                reader.close()
+                ouiMap = map
+            } catch (e: java.io.FileNotFoundException) {
+                return "Unknown"
             } catch (e: Exception) {
                 e.printStackTrace()
+                return "Unknown"
             }
-            ouiMap = map
         }
 
         val vendor = ouiMap?.get(oui) ?: "Unknown"

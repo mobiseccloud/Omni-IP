@@ -28,8 +28,7 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
         if (_isExecuting.value) return
 
         if (action == "PORTSCAN_DEEP") {
-            val sharedPrefs = getApplication<Application>().getSharedPreferences("premium_entitlement", Context.MODE_PRIVATE)
-            val isPremium = sharedPrefs.getBoolean("is_premium", false)
+            val isPremium = NativeEngine.isPremiumUnlockedNative()
             if (!isPremium) {
                 _showUpgradePrompt.value = true
                 return
@@ -44,13 +43,11 @@ class DashboardViewModel(application: Application) : AndroidViewModel(applicatio
                 val output = when (action) {
                     "PING" -> NativeEngine.executeRawPing(ip)
                     "TRACEROUTE" -> NativeEngine.executeTraceroute(ip)
+                    "PORTSCAN" -> NativeEngine.executeNmapScan(ip)
                     "PORTSCAN_FAST" -> {
-                        // Pass lightweight args conceptually, but NativeEngine currently just takes target.
-                        // Ideally NativeEngine.executeNmapScan(target, flags)
                         NativeEngine.executeNmapScan(ip)
                     }
                     "PORTSCAN_DEEP" -> {
-                        // Pass aggressive flags -p- -A conceptually
                         NativeEngine.executeNmapScan("$ip -p- -A")
                     }
                     else -> "Unknown action."
