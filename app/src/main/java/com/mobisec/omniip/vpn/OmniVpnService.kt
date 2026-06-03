@@ -389,8 +389,10 @@ class OmniVpnService : VpnService() {
                         }
                     }
                 }
-            } catch (e: Exception) {
-                // Ignore exceptions (e.g., AddressNotFoundException)
+            } catch (e: com.maxmind.geoip2.exception.AddressNotFoundException) {
+                // Ignore expected missing address exceptions
+            } catch (e: java.io.IOException) {
+                Log.e(TAG, "IOException resolving GeoIP for target: $targetIp", e)
             }
 
 val targetIpString = targetIp.hostAddress ?: ""
@@ -484,7 +486,7 @@ val targetIpString = targetIp.hostAddress ?: ""
                 }
             }
 
-            if (finalAction != Action.IGNORE) {
+            if (!(ruleApplied && finalAction == Action.IGNORE)) {
                 threatBloomFilter?.let { filter ->
                     var threatFound = false
                     if (filter.mightContain(targetIpString)) {
@@ -681,11 +683,33 @@ val targetIpString = targetIp.hostAddress ?: ""
                     }
                 } else {
                     Log.e(TAG, "DoH query failed with code: ${response.code}")
+                    logDnsFailure(originalDestIp, originalSourcePort, "DoH Error ${response.code}")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "DNS forwarding failed", e)
+                logDnsFailure(originalDestIp, originalSourcePort, "DNS forwarding failed")
             }
             Unit
+        }
+    }
+
+    private suspend fun logDnsFailure(destIp: InetAddress, destPort: Int, errorMsg: String) {
+        try {
+            val db = AppDatabase.getDatabase(this@OmniVpnService)
+            val logDao = db.connectionLogDao()
+            logDao.insertLog(
+                ConnectionLog(
+                    destIp = destIp.hostAddress ?: "Unknown",
+                    destPort = 53,
+                    asn = null,
+                    countryCode = null,
+                    city = null,
+                    appName = "DNS Resolver",
+                    action = "FAIL: $errorMsg"
+                )
+            )
+        } catch(e: Exception) {
+            Log.e(TAG, "Failed to log DNS failure", e)
         }
     }
 
