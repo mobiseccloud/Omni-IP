@@ -14,6 +14,7 @@ import com.mobisec.omniip.db.AppDatabase
 import com.mobisec.omniip.db.Action
 import com.mobisec.omniip.db.TargetType
 import com.mobisec.omniip.db.FirewallRule
+import com.mobisec.omniip.db.ConnectionLog
 import com.maxmind.geoip2.DatabaseReader
 import com.mobisec.omniip.model.ConnectionDirection
 import com.google.common.cache.CacheBuilder
@@ -104,6 +105,11 @@ class OmniVpnService : VpnService() {
             .build<Int, ExfiltrationMetrics>()
         var activeAppsFlow = kotlinx.coroutines.flow.MutableStateFlow<List<Pair<Int, String>>>(emptyList())
         val appInfoCache = ConcurrentHashMap<Int, Triple<String, String, Drawable?>>()
+
+        private val sessionLogCache = CacheBuilder.newBuilder()
+            .expireAfterWrite(10, java.util.concurrent.TimeUnit.MINUTES)
+            .maximumSize(10000)
+            .build<String, Boolean>()
         var currentTargetMetricsFlow = kotlinx.coroutines.flow.MutableStateFlow(ExfiltrationMetrics())
 
         private val _telemetryFlow = MutableSharedFlow<ConnectionTelemetry>(extraBufferCapacity = 100)
@@ -521,6 +527,36 @@ val targetIpString = targetIp.hostAddress ?: ""
                 isIgnored = (ruleApplied && finalAction == Action.IGNORE)
             )
             _telemetryFlow.tryEmit(telemetry)
+
+            val actionStr = when {
+                ruleApplied && finalAction == Action.BLOCK -> "BLOCK"
+                ruleApplied && finalAction == Action.FLAG -> "FLAG"
+                else -> "ALLOW"
+            }
+
+            val sessionKey = "${uid}:${destIp.hostAddress}:${destPort}"
+            if (sessionLogCache.getIfPresent(sessionKey) == null) {
+                sessionLogCache.put(sessionKey, true)
+                scope.launch(Dispatchers.IO) {
+                    try {
+                        val db = AppDatabase.getDatabase(this@OmniVpnService)
+                        val logDao = db.connectionLogDao()
+                        logDao.insertLog(
+                            ConnectionLog(
+                                destIp = destIp.hostAddress ?: "Unknown",
+                                destPort = destPort,
+                                asn = asnName,
+                                countryCode = countryIsoCode,
+                                city = cityName,
+                                appName = appInfo.first,
+                                action = actionStr
+                            )
+                        )
+                    } catch(e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            }
 
             if (ruleApplied && finalAction == Action.BLOCK) {
                 // Drop packet entirely

@@ -18,9 +18,15 @@ import java.io.File
 import java.io.FileReader
 import java.io.InputStreamReader
 
-class LanScannerViewModel(application: Application) : AndroidViewModel(application) {
-    private val _discoveredDevices = MutableStateFlow<List<DiscoveredDevice>>(emptyList())
-    val discoveredDevices: StateFlow<List<DiscoveredDevice>> = _discoveredDevices
+import androidx.lifecycle.SavedStateHandle
+
+class LanScannerViewModel(application: Application, private val savedStateHandle: SavedStateHandle) : AndroidViewModel(application) {
+    private val DISCOVERED_DEVICES_KEY = "discovered_devices"
+    val discoveredDevices: StateFlow<List<DiscoveredDevice>> = savedStateHandle.getStateFlow(DISCOVERED_DEVICES_KEY, emptyList())
+
+    private fun setDiscoveredDevices(devices: List<DiscoveredDevice>) {
+        savedStateHandle[DISCOVERED_DEVICES_KEY] = devices
+    }
 
     private val _isScanning = MutableStateFlow(false)
     val isScanning: StateFlow<Boolean> = _isScanning
@@ -33,7 +39,7 @@ class LanScannerViewModel(application: Application) : AndroidViewModel(applicati
     fun executeLanSweep() {
         if (_isScanning.value) return
         _isScanning.value = true
-        _discoveredDevices.value = emptyList()
+        setDiscoveredDevices(emptyList())
 
         viewModelScope.launch(Dispatchers.IO) {
             val wifiManager = getApplication<Application>().getSystemService(Context.WIFI_SERVICE) as WifiManager
@@ -76,7 +82,7 @@ class LanScannerViewModel(application: Application) : AndroidViewModel(applicati
                 e.printStackTrace()
             }
 
-            _discoveredDevices.value = newDevices
+            setDiscoveredDevices(newDevices)
             _isScanning.value = false
         }
     }
