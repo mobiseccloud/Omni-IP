@@ -64,6 +64,137 @@ const uint32_t FLAG_DEBUG = 0x1A2B3C4D;
 const uint32_t FLAG_PREMIUM = 0x9F8E7D6C;
 const uint32_t FLAG_VERIFIED_INSTALL = 0x11223344;
 
+template <size_t N, char KEY>
+class XorString {
+private:
+    char data[N];
+public:
+    constexpr XorString(const char (&str)[N]) : data{0} {
+        for (size_t i = 0; i < N - 1; ++i) {
+            data[i] = str[i] ^ KEY;
+        }
+        data[N - 1] = '\0';
+    }
+
+    class DecryptedString {
+    private:
+        char* str;
+    public:
+        DecryptedString(const char* data, size_t size, char key) {
+            str = new char[size];
+            for (size_t i = 0; i < size - 1; ++i) {
+                str[i] = data[i] ^ key;
+            }
+            str[size - 1] = '\0';
+        }
+
+        DecryptedString(const DecryptedString&) = delete;
+        DecryptedString& operator=(const DecryptedString&) = delete;
+        DecryptedString(DecryptedString&& other) noexcept : str(other.str) {
+            other.str = nullptr;
+        }
+        DecryptedString& operator=(DecryptedString&& other) noexcept {
+            if (this != &other) {
+                if (str) {
+                    volatile char* p = str;
+                    while (*p) { *p++ = 0; }
+                    delete[] str;
+                }
+                str = other.str;
+                other.str = nullptr;
+            }
+            return *this;
+        }
+
+        ~DecryptedString() {
+            if (str) {
+                volatile char* p = str;
+                while (*p) { *p++ = 0; }
+                delete[] str;
+            }
+        }
+        const char* c_str() const { return str; }
+        std::string str_val() const { return std::string(str); }
+        operator std::string() const { return str_val(); }
+    };
+
+    DecryptedString decrypt() const {
+        return DecryptedString(data, N, KEY);
+    }
+};
+
+template <size_t N, char COMPILE_KEY>
+class XorStringDynamic {
+private:
+    char data[N];
+public:
+    constexpr XorStringDynamic(const char (&str)[N]) : data{0} {
+        for (size_t i = 0; i < N - 1; ++i) {
+            data[i] = str[i] ^ COMPILE_KEY;
+        }
+        data[N - 1] = '\0';
+    }
+
+    class DecryptedStringDynamic {
+    private:
+        char* str;
+    public:
+        DecryptedStringDynamic(const char* data, size_t size, char runtime_key) {
+            str = new char[size];
+            for (size_t i = 0; i < size - 1; ++i) {
+                str[i] = data[i] ^ runtime_key;
+            }
+            str[size - 1] = '\0';
+        }
+
+        DecryptedStringDynamic(const DecryptedStringDynamic&) = delete;
+        DecryptedStringDynamic& operator=(const DecryptedStringDynamic&) = delete;
+        DecryptedStringDynamic(DecryptedStringDynamic&& other) noexcept : str(other.str) {
+            other.str = nullptr;
+        }
+        DecryptedStringDynamic& operator=(DecryptedStringDynamic&& other) noexcept {
+            if (this != &other) {
+                if (str) {
+                    volatile char* p = str;
+                    while (*p) { *p++ = 0; }
+                    delete[] str;
+                }
+                str = other.str;
+                other.str = nullptr;
+            }
+            return *this;
+        }
+
+        ~DecryptedStringDynamic() {
+            if (str) {
+                volatile char* p = str;
+                while (*p) { *p++ = 0; }
+                delete[] str;
+            }
+        }
+        const char* c_str() const { return str; }
+        std::string str_val() const { return std::string(str); }
+        operator std::string() const { return str_val(); }
+    };
+
+    DecryptedStringDynamic decrypt() const {
+        char runtime_key = COMPILE_KEY;
+
+        uint32_t has_verified = ((g_auth_state & FLAG_VERIFIED_INSTALL) == FLAG_VERIFIED_INSTALL) ? 1 : 0;
+        uint32_t has_debug = ((g_auth_state & FLAG_DEBUG) == FLAG_DEBUG) ? 1 : 0;
+        uint32_t has_premium = ((g_auth_state & FLAG_PREMIUM) == FLAG_PREMIUM) ? 1 : 0;
+
+        uint32_t is_invalid = has_premium & ((has_verified | has_debug) ^ 1);
+
+        runtime_key ^= (is_invalid * 0x5A);
+
+        return DecryptedStringDynamic(data, N, runtime_key);
+    }
+};
+
+#define DECRYPT_STR_STATIC(str) (XorString<sizeof(str), 0x55>(str).decrypt())
+#define DECRYPT_STR_DYNAMIC(str) (XorStringDynamic<sizeof(str), 0x42>(str).decrypt())
+
 bool is_safe(const std::string& input) {
     for (char c : input) {
         if (!isalnum(c) && c != '.' && c != ':' && c != '-' && c != ' ') {
@@ -77,14 +208,14 @@ bool is_safe(const std::string& input) {
 std::string exec(const char* cmd) {
     int pipefd[2];
     if (pipe(pipefd) == -1) {
-        return "Error: pipe() failed";
+        return DECRYPT_STR_STATIC("Error: pipe() failed");
     }
 
     pid_t pid = fork();
     if (pid == -1) {
         close(pipefd[0]);
         close(pipefd[1]);
-        return "Error: fork() failed";
+        return DECRYPT_STR_STATIC("Error: fork() failed");
     }
 
     if (pid == 0) {
@@ -95,7 +226,9 @@ std::string exec(const char* cmd) {
         close(pipefd[1]);
 
         // Instructions specified execvp
-        const char *args[] = {"/system/bin/sh", "-c", cmd, nullptr};
+        std::string sh_cmd = DECRYPT_STR_STATIC("/system/bin/sh");
+        std::string sh_arg = DECRYPT_STR_STATIC("-c");
+        const char *args[] = {sh_cmd.c_str(), sh_arg.c_str(), cmd, nullptr};
         execvp(args[0], (char* const*)args);
         // If execvp fails, we exit
         exit(1);
@@ -153,14 +286,14 @@ std::string exec(const char* cmd) {
         close(pipefd[0]);
 
         if (timed_out) {
-            return "Error: Command execution timed out (60 seconds)";
+            return DECRYPT_STR_STATIC("Error: Command execution timed out (60 seconds)");
         }
 
         return result;
     }
 }
 
-extern "C" JNIEXPORT jstring JNICALL
+extern "C" __attribute__ ((visibility ("default"))) JNIEXPORT jstring JNICALL
 Java_com_mobisec_omniip_core_NativeEngine_executeNmapScan(
         JNIEnv* env,
         jobject /* this */,
@@ -171,13 +304,13 @@ Java_com_mobisec_omniip_core_NativeEngine_executeNmapScan(
 
     if (!is_safe(target_str)) {
         env->ReleaseStringUTFChars(target, targetStr);
-        return env->NewStringUTF("Error: Invalid characters in target string.");
+        return env->NewStringUTF(DECRYPT_STR_STATIC("Error: Invalid characters in target string.").c_str());
     }
 
-    if (target_str.find("-p-") != std::string::npos || target_str.find("-A") != std::string::npos) {
+    if (target_str.find(DECRYPT_STR_STATIC("-p-").c_str()) != std::string::npos || target_str.find(DECRYPT_STR_STATIC("-A").c_str()) != std::string::npos) {
         if ((g_auth_state & FLAG_PREMIUM) == 0 && (g_auth_state & FLAG_DEBUG) == 0) {
             env->ReleaseStringUTFChars(target, targetStr);
-            return env->NewStringUTF("Error: Premium entitlement required for deep scanning.");
+            return env->NewStringUTF(DECRYPT_STR_DYNAMIC("Error: Premium entitlement required for deep scanning.").c_str());
         }
     }
 
@@ -185,18 +318,18 @@ Java_com_mobisec_omniip_core_NativeEngine_executeNmapScan(
     // As a demonstration for the prompt: "stream the matrix-green terminal output."
     // In a real device with nmap compiled, we would run nmap.
     // For this simulation/sandbox, we just return a simulated output.
-    std::string result = "Starting Nmap scan for " + std::string(targetStr) + "\n";
-    result += "Host is up (0.00013s latency).\n";
-    result += "Not shown: 99 closed ports\n";
-    result += "PORT   STATE SERVICE\n";
-    result += "80/tcp open  http\n";
-    result += "\nNmap done: 1 IP address (1 host up) scanned in 0.10 seconds\n";
+    std::string result = std::string(DECRYPT_STR_STATIC("Starting Nmap scan for ").c_str()) + std::string(targetStr) + std::string(DECRYPT_STR_STATIC("\n").c_str());
+    result += DECRYPT_STR_STATIC("Host is up (0.00013s latency).\n").c_str();
+    result += DECRYPT_STR_STATIC("Not shown: 99 closed ports\n").c_str();
+    result += DECRYPT_STR_STATIC("PORT   STATE SERVICE\n").c_str();
+    result += DECRYPT_STR_STATIC("80/tcp open  http\n").c_str();
+    result += DECRYPT_STR_STATIC("\nNmap done: 1 IP address (1 host up) scanned in 0.10 seconds\n").c_str();
 
     env->ReleaseStringUTFChars(target, targetStr);
     return env->NewStringUTF(result.c_str());
 }
 
-extern "C" JNIEXPORT jstring JNICALL
+extern "C" __attribute__ ((visibility ("default"))) JNIEXPORT jstring JNICALL
 Java_com_mobisec_omniip_core_NativeEngine_executeRawPing(
         JNIEnv* env,
         jobject /* this */,
@@ -207,11 +340,11 @@ Java_com_mobisec_omniip_core_NativeEngine_executeRawPing(
 
     if (!is_safe(target_str)) {
         env->ReleaseStringUTFChars(target, targetStr);
-        return env->NewStringUTF("Error: Invalid characters in target string.");
+        return env->NewStringUTF(DECRYPT_STR_STATIC("Error: Invalid characters in target string.").c_str());
     }
 
     // Simulate ping or run actual ping
-    std::string cmd = "ping -c 4 " + target_str + " 2>&1";
+    std::string cmd = std::string(DECRYPT_STR_STATIC("ping -c 4 ").c_str()) + target_str + std::string(DECRYPT_STR_STATIC(" 2>&1").c_str());
 
     std::string result = exec(cmd.c_str());
 
@@ -219,7 +352,7 @@ Java_com_mobisec_omniip_core_NativeEngine_executeRawPing(
     return env->NewStringUTF(result.c_str());
 }
 
-extern "C" JNIEXPORT jstring JNICALL
+extern "C" __attribute__ ((visibility ("default"))) JNIEXPORT jstring JNICALL
 Java_com_mobisec_omniip_core_NativeEngine_executeLanSweep(
         JNIEnv* env,
         jobject /* this */,
@@ -232,27 +365,27 @@ Java_com_mobisec_omniip_core_NativeEngine_executeLanSweep(
     // Since icmpenguin integration requires linking, we'll just return a success message here,
     // and rely on reading /proc/net/arp in Kotlin.
 
-    std::string result = "Sweep started on " + std::string(subnetStr) + "\n";
+    std::string result = std::string(DECRYPT_STR_STATIC("Sweep started on ").c_str()) + std::string(subnetStr) + std::string(DECRYPT_STR_STATIC("\n").c_str());
 
     env->ReleaseStringUTFChars(subnet, subnetStr);
     return env->NewStringUTF(result.c_str());
 }
 
-extern "C" JNIEXPORT jstring JNICALL
+extern "C" __attribute__ ((visibility ("default"))) JNIEXPORT jstring JNICALL
 Java_com_mobisec_omniip_core_NativeEngine_executeTraceroute(
         JNIEnv* env,
         jobject /* this */,
         jstring target) {
     const char *targetStr = env->GetStringUTFChars(target, 0);
-    std::string result = "Traceroute to " + std::string(targetStr) + "...\n";
-    result += "1  192.168.1.1  1.2 ms\n";
-    result += "2  10.0.0.1     5.4 ms\n";
-    result += "3  " + std::string(targetStr) + "    12.3 ms\n";
+    std::string result = std::string(DECRYPT_STR_STATIC("Traceroute to ").c_str()) + std::string(targetStr) + std::string(DECRYPT_STR_STATIC("...\n").c_str());
+    result += DECRYPT_STR_STATIC("1  192.168.1.1  1.2 ms\n").c_str();
+    result += DECRYPT_STR_STATIC("2  10.0.0.1     5.4 ms\n").c_str();
+    result += std::string(DECRYPT_STR_STATIC("3  ").c_str()) + std::string(targetStr) + std::string(DECRYPT_STR_STATIC("    12.3 ms\n").c_str());
     env->ReleaseStringUTFChars(target, targetStr);
     return env->NewStringUTF(result.c_str());
 }
 
-extern "C" JNIEXPORT void JNICALL
+extern "C" __attribute__ ((visibility ("default"))) JNIEXPORT void JNICALL
 Java_com_mobisec_omniip_core_NativeEngine_initializeNativeEnvironment(
         JNIEnv* env,
         jobject /* this */,
@@ -263,19 +396,21 @@ Java_com_mobisec_omniip_core_NativeEngine_initializeNativeEnvironment(
 }
 
 void detectDebugger() {
-    FILE *fp = fopen("/proc/self/status", "r");
+    FILE *fp = fopen(DECRYPT_STR_STATIC("/proc/self/status").c_str(), DECRYPT_STR_STATIC("r").c_str());
     if (fp) {
         char line[256];
+        std::string tracer_prefix = DECRYPT_STR_STATIC("TracerPid:");
+        std::string tracer_format = DECRYPT_STR_STATIC("TracerPid: %d");
         while (fgets(line, sizeof(line), fp)) {
-            if (strncmp(line, "TracerPid:", 10) == 0) {
+            if (strncmp(line, tracer_prefix.c_str(), 10) == 0) {
                 int tracerPid = 0;
-                if (sscanf(line, "TracerPid: %d", &tracerPid) == 1) {
+                if (sscanf(line, tracer_format.c_str(), &tracerPid) == 1) {
                     if (tracerPid > 0) {
                         if ((g_auth_state & FLAG_DEBUG) == 0) {
                             raise(SIGKILL);
                         } else {
                             // Debug build, skip killing
-                            __android_log_print(ANDROID_LOG_WARN, "OmniIP-RASP", "Debugger attached (TracerPid > 0), but ignoring due to debug build.");
+                            __android_log_print(ANDROID_LOG_WARN, DECRYPT_STR_STATIC("OmniIP-RASP").c_str(), "%s", DECRYPT_STR_STATIC("Debugger attached (TracerPid > 0), but ignoring due to debug build.").c_str());
                         }
                     }
                 }
@@ -292,18 +427,19 @@ void detectCompromisedEnvironment() {
     bool is_compromised = false;
 
     // Implementation 1 (Root): Check for su binaries
-    if (access("/sbin/su", F_OK) == 0 ||
-        access("/system/bin/su", F_OK) == 0 ||
-        access("/system/xbin/su", F_OK) == 0) {
+    if (access(DECRYPT_STR_STATIC("/sbin/su").c_str(), F_OK) == 0 ||
+        access(DECRYPT_STR_STATIC("/system/bin/su").c_str(), F_OK) == 0 ||
+        access(DECRYPT_STR_STATIC("/system/xbin/su").c_str(), F_OK) == 0) {
         is_compromised = true;
     }
 
     // Implementation 2 (Frida): Check loaded memory regions
-    FILE *fp = fopen("/proc/self/maps", "r");
+    FILE *fp = fopen(DECRYPT_STR_STATIC("/proc/self/maps").c_str(), DECRYPT_STR_STATIC("r").c_str());
     if (fp) {
         char line[512];
+        std::string frida_str = DECRYPT_STR_STATIC("frida");
         while (fgets(line, sizeof(line), fp)) {
-            if (strstr(line, "frida") != nullptr) {
+            if (strstr(line, frida_str.c_str()) != nullptr) {
                 is_compromised = true;
                 break;
             }
@@ -313,10 +449,10 @@ void detectCompromisedEnvironment() {
 
     if (is_compromised) {
         if ((g_auth_state & FLAG_DEBUG) == 0) {
-            __android_log_print(ANDROID_LOG_ERROR, "OmniIP-RASP", "SEVERE: Compromised environment detected (Root/Frida). Stripping premium flags.");
+            __android_log_print(ANDROID_LOG_ERROR, DECRYPT_STR_STATIC("OmniIP-RASP").c_str(), "%s", DECRYPT_STR_STATIC("SEVERE: Compromised environment detected (Root/Frida). Stripping premium flags.").c_str());
             g_auth_state &= ~FLAG_PREMIUM;
         } else {
-            __android_log_print(ANDROID_LOG_WARN, "OmniIP-RASP", "Compromised environment detected (Root/Frida), but ignoring due to debug build.");
+            __android_log_print(ANDROID_LOG_WARN, DECRYPT_STR_STATIC("OmniIP-RASP").c_str(), "%s", DECRYPT_STR_STATIC("Compromised environment detected (Root/Frida), but ignoring due to debug build.").c_str());
         }
     }
 }
@@ -324,14 +460,14 @@ void detectCompromisedEnvironment() {
 void verifyInstallerSource(JNIEnv* env, jobject context) {
     jclass contextClass = env->GetObjectClass(context);
 
-    jmethodID getPackageManagerMethod = env->GetMethodID(contextClass, "getPackageManager", "()Landroid/content/pm/PackageManager;");
+    jmethodID getPackageManagerMethod = env->GetMethodID(contextClass, DECRYPT_STR_STATIC("getPackageManager").c_str(), DECRYPT_STR_STATIC("()Landroid/content/pm/PackageManager;").c_str());
     jobject packageManager = env->CallObjectMethod(context, getPackageManagerMethod);
 
-    jmethodID getPackageNameMethod = env->GetMethodID(contextClass, "getPackageName", "()Ljava/lang/String;");
+    jmethodID getPackageNameMethod = env->GetMethodID(contextClass, DECRYPT_STR_STATIC("getPackageName").c_str(), DECRYPT_STR_STATIC("()Ljava/lang/String;").c_str());
     jstring packageName = (jstring) env->CallObjectMethod(context, getPackageNameMethod);
 
     jclass packageManagerClass = env->GetObjectClass(packageManager);
-    jmethodID getInstallerPackageNameMethod = env->GetMethodID(packageManagerClass, "getInstallerPackageName", "(Ljava/lang/String;)Ljava/lang/String;");
+    jmethodID getInstallerPackageNameMethod = env->GetMethodID(packageManagerClass, DECRYPT_STR_STATIC("getInstallerPackageName").c_str(), DECRYPT_STR_STATIC("(Ljava/lang/String;)Ljava/lang/String;").c_str());
     jstring installerPackageName = (jstring) env->CallObjectMethod(packageManager, getInstallerPackageNameMethod, packageName);
 
     bool is_verified = false;
@@ -339,8 +475,9 @@ void verifyInstallerSource(JNIEnv* env, jobject context) {
         const char *installerStr = env->GetStringUTFChars(installerPackageName, 0);
         if (installerStr != nullptr) {
             std::string installerString(installerStr);
-            if (installerString == "com.android.vending") {
+            if (installerString == std::string(DECRYPT_STR_STATIC("com.android.vending").c_str())) {
                 is_verified = true;
+                g_auth_state |= FLAG_VERIFIED_INSTALL;
             }
             env->ReleaseStringUTFChars(installerPackageName, installerStr);
         }
@@ -350,12 +487,12 @@ void verifyInstallerSource(JNIEnv* env, jobject context) {
         if ((g_auth_state & FLAG_DEBUG) == 0) {
             g_auth_state &= ~FLAG_VERIFIED_INSTALL;
         } else {
-            __android_log_print(ANDROID_LOG_WARN, "OmniIP-RASP", "Invalid installer source detected, but ignoring due to debug build.");
+            __android_log_print(ANDROID_LOG_WARN, DECRYPT_STR_STATIC("OmniIP-RASP").c_str(), "%s", DECRYPT_STR_STATIC("Invalid installer source detected, but ignoring due to debug build.").c_str());
         }
     }
 }
 
-extern "C" JNIEXPORT void JNICALL
+extern "C" __attribute__ ((visibility ("default"))) JNIEXPORT void JNICALL
 Java_com_mobisec_omniip_core_NativeEngine_executeSecuritySweep(
         JNIEnv* env,
         jobject /* this */,
@@ -365,7 +502,7 @@ Java_com_mobisec_omniip_core_NativeEngine_executeSecuritySweep(
     detectCompromisedEnvironment();
 }
 
-extern "C" JNIEXPORT void JNICALL
+extern "C" __attribute__ ((visibility ("default"))) JNIEXPORT void JNICALL
 Java_com_mobisec_omniip_core_NativeEngine_setPremiumUnlockedNative(
         JNIEnv* env,
         jobject /* this */,
@@ -377,7 +514,7 @@ Java_com_mobisec_omniip_core_NativeEngine_setPremiumUnlockedNative(
     }
 }
 
-extern "C" JNIEXPORT void JNICALL
+extern "C" __attribute__ ((visibility ("default"))) JNIEXPORT void JNICALL
 Java_com_mobisec_omniip_core_NativeEngine_updateNativeRule(
         JNIEnv* env,
         jobject /* this */,
@@ -394,7 +531,7 @@ Java_com_mobisec_omniip_core_NativeEngine_updateNativeRule(
     env->ReleaseStringUTFChars(key, keyStr);
 }
 
-extern "C" JNIEXPORT void JNICALL
+extern "C" __attribute__ ((visibility ("default"))) JNIEXPORT void JNICALL
 Java_com_mobisec_omniip_core_NativeEngine_clearNativeRules(
         JNIEnv* env,
         jobject /* this */) {
@@ -402,7 +539,7 @@ Java_com_mobisec_omniip_core_NativeEngine_clearNativeRules(
     g_native_rule_cache.clear();
 }
 
-extern "C" JNIEXPORT void JNICALL
+extern "C" __attribute__ ((visibility ("default"))) JNIEXPORT void JNICALL
 Java_com_mobisec_omniip_core_NativeEngine_syncThreatBloomFilter(
         JNIEnv* env,
         jobject /* this */,
@@ -426,7 +563,7 @@ Java_com_mobisec_omniip_core_NativeEngine_syncThreatBloomFilter(
     }
 }
 
-extern "C" JNIEXPORT jint JNICALL
+extern "C" __attribute__ ((visibility ("default"))) JNIEXPORT jint JNICALL
 Java_com_mobisec_omniip_core_NativeEngine_processPacketNative(
         JNIEnv* env,
         jobject /* this */,
@@ -471,7 +608,7 @@ Java_com_mobisec_omniip_core_NativeEngine_processPacketNative(
     std::unique_lock<std::mutex> lock(g_rule_mutex);
 
     // Step 2: Check if the destination matches an entry in g_native_rule_cache.
-    std::string ip_key = "IP_ADDRESS:" + std::string(dest_ip_str);
+    std::string ip_key = std::string(DECRYPT_STR_STATIC("IP_ADDRESS:").c_str()) + std::string(dest_ip_str);
     auto it = g_native_rule_cache.find(ip_key);
     if (it != g_native_rule_cache.end()) {
         int action = it->second.action_code;
