@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -203,11 +204,10 @@ fun DnsLookupScreen() {
 }
 
 @Composable
-fun PortScannerScreen() {
-    var target by remember { mutableStateOf("") }
-    var output by remember { mutableStateOf("") }
-    var showUpgradePrompt by remember { mutableStateOf(false) }
-    val coroutineScope = rememberCoroutineScope()
+fun PortScannerScreen(onRequirePremium: () -> Unit = {}) {
+    var target by rememberSaveable { mutableStateOf("") }
+    var output by rememberSaveable { mutableStateOf("") }
+        val coroutineScope = rememberCoroutineScope()
 
     Column(modifier = Modifier.fillMaxSize().background(PureBlack).padding(16.dp)) {
         Text("PORT SCANNER MODULE", color = MatrixGreen, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
@@ -250,7 +250,7 @@ fun PortScannerScreen() {
                             }
                         }
                     } else {
-                        showUpgradePrompt = true
+                        onRequirePremium()
                     }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = TacticalAmber)
@@ -259,10 +259,7 @@ fun PortScannerScreen() {
             }
         }
         Spacer(modifier = Modifier.height(16.dp))
-        if (showUpgradePrompt) {
-            Text("PREMIUM REQUIRED for Deep Scan. Upgrade now to unlock.", color = TacticalAmber, fontSize = 14.sp, fontFamily = FontFamily.Monospace)
-            Spacer(modifier = Modifier.height(8.dp))
-        }
+
         Text(output, color = MatrixGreen, fontSize = 14.sp, fontFamily = FontFamily.Monospace)
     }
 }
@@ -273,8 +270,8 @@ fun PortScannerScreen() {
 @Composable fun IpConverterScreen() { GenericStubScreen("IP CONVERTER MODULE") }
 
 @Composable
-fun WifiScannerScreen() {
-    var output by remember { mutableStateOf("Ready to scan WiFi networks...") }
+fun WifiScannerScreen(onRequirePremium: () -> Unit = {}) {
+    var output by rememberSaveable { mutableStateOf("Ready to scan WiFi networks...") }
     val coroutineScope = rememberCoroutineScope()
 
     Column(modifier = Modifier.fillMaxSize().background(PureBlack).padding(16.dp)) {
@@ -282,12 +279,16 @@ fun WifiScannerScreen() {
         Spacer(modifier = Modifier.height(16.dp))
         Button(
             onClick = {
-                coroutineScope.launch {
-                    output = "Scanning WiFi networks..."
-                    // Simulated WiFi scan
-                    output = withContext(Dispatchers.IO) {
-                        "SSID: Corporate-Secure (BSSID: 00:11:22:33:44:55)\nSignal: -45 dBm\nSecurity: WPA3\n\nSSID: Guest (BSSID: 00:11:22:33:44:56)\nSignal: -70 dBm\nSecurity: Open"
+                if (NativeEngine.isPremiumUnlockedNative()) {
+                    coroutineScope.launch {
+                        output = "Scanning WiFi networks..."
+                        // Simulated WiFi scan
+                        output = withContext(Dispatchers.IO) {
+                            "SSID: Corporate-Secure (BSSID: 00:11:22:33:44:55)\nSignal: -45 dBm\nSecurity: WPA3\n\nSSID: Guest (BSSID: 00:11:22:33:44:56)\nSignal: -70 dBm\nSecurity: Open"
+                        }
                     }
+                } else {
+                    onRequirePremium()
                 }
             },
             colors = ButtonDefaults.buttonColors(containerColor = MatrixGreen)

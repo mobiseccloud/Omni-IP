@@ -6,7 +6,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 
 @Composable
-fun ToolkitNavHost() {
+fun ToolkitNavHost(onRequirePremium: () -> Unit = {}) {
     val navController = rememberNavController()
 
     NavHost(navController = navController, startDestination = "toolkit") {
@@ -15,12 +15,12 @@ fun ToolkitNavHost() {
         composable("whois") { WhoisScreen() }
         composable("traceroute") { TracerouteScreen() }
         composable("dns") { DnsLookupScreen() }
-        composable("portscan") { PortScannerScreen() }
+        composable("portscan") { PortScannerScreen(onRequirePremium) }
         composable("ipcalc") { IpCalculatorScreen() }
         composable("connlog") { ConnectionLogScreen() }
         composable("router") { RouterSetupScreen() }
         composable("ipconv") { IpConverterScreen() }
-        composable("wifi") { WifiScannerScreen() }
+        composable("wifi") { WifiScannerScreen(onRequirePremium) }
         composable("netstats") { NetworkStatsScreen() }
     }
 }
