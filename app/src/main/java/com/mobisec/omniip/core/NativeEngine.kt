@@ -11,4 +11,5 @@ object NativeEngine {
     external fun executeTraceroute(target: String): String
     external fun initializeNativeEnvironment(isDebug: Boolean)
     external fun setPremiumUnlockedNative(unlocked: Boolean)
+    external fun executeSecuritySweep(context: android.content.Context)
 }
