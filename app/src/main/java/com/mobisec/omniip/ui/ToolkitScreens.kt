@@ -274,15 +274,11 @@ fun PortScannerScreen(onRequirePremium: () -> Unit = {}) {
             Spacer(modifier = Modifier.width(8.dp))
             Button(
                 onClick = {
-                    if (NativeEngine.isPremiumUnlockedNative()) {
-                        coroutineScope.launch {
-                            output = "Starting Deep Scan on $target..."
-                            output = withContext(Dispatchers.IO) {
-                                NativeEngine.executeNmapScan("$target -p- -A")
-                            }
+                    coroutineScope.launch {
+                        output = "Starting Deep Scan on $target..."
+                        output = withContext(Dispatchers.IO) {
+                            NativeEngine.executeNmapScan("$target -p- -A")
                         }
-                    } else {
-                        onRequirePremium()
                     }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = TacticalAmber)
@@ -481,16 +477,12 @@ fun WifiScannerScreen(onRequirePremium: () -> Unit = {}) {
         Spacer(modifier = Modifier.height(16.dp))
         Button(
             onClick = {
-                if (NativeEngine.isPremiumUnlockedNative()) {
-                    coroutineScope.launch {
-                        output = "Scanning WiFi networks..."
-                        // Simulated WiFi scan
-                        output = withContext(Dispatchers.IO) {
-                            "SSID: Corporate-Secure (BSSID: 00:11:22:33:44:55)\nSignal: -45 dBm\nSecurity: WPA3\n\nSSID: Guest (BSSID: 00:11:22:33:44:56)\nSignal: -70 dBm\nSecurity: Open"
-                        }
+                coroutineScope.launch {
+                    output = "Scanning WiFi networks..."
+                    // Simulated WiFi scan
+                    output = withContext(Dispatchers.IO) {
+                        "SSID: Corporate-Secure (BSSID: 00:11:22:33:44:55)\nSignal: -45 dBm\nSecurity: WPA3\n\nSSID: Guest (BSSID: 00:11:22:33:44:56)\nSignal: -70 dBm\nSecurity: Open"
                     }
-                } else {
-                    onRequirePremium()
                 }
             },
             colors = ButtonDefaults.buttonColors(containerColor = MatrixGreen)
