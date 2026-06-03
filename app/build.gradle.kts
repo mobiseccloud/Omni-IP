@@ -19,6 +19,9 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+        ndk {
+            abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a", "x86_64"))
+        }
     }
 
     buildTypes {
@@ -51,6 +54,12 @@ android {
     lint {
         abortOnError = false
     }
+    externalNativeBuild {
+        cmake {
+            path("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
 }
 
 dependencies {
@@ -79,4 +88,5 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.7.7")
     implementation("io.noties.markwon:core:4.6.2")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("dnsjava:dnsjava:3.5.3")
 }
