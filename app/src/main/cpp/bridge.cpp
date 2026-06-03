@@ -15,6 +15,11 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <mutex>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <sys/types.h>
+#include <signal.h>
+#include <fcntl.h>
 
 std::mutex native_exec_mutex;
 
@@ -31,20 +36,89 @@ bool is_safe(const std::string& input) {
 
 
 std::string exec(const char* cmd) {
-    char buffer[128];
-    std::string result = "";
-    FILE* pipe = popen(cmd, "r");
-    if (!pipe) throw std::runtime_error("popen() failed!");
-    try {
-        while (fgets(buffer, sizeof buffer, pipe) != NULL) {
+    int pipefd[2];
+    if (pipe(pipefd) == -1) {
+        return "Error: pipe() failed";
+    }
+
+    pid_t pid = fork();
+    if (pid == -1) {
+        close(pipefd[0]);
+        close(pipefd[1]);
+        return "Error: fork() failed";
+    }
+
+    if (pid == 0) {
+        // Child process
+        close(pipefd[0]); // Close unused read end
+        dup2(pipefd[1], STDOUT_FILENO);
+        dup2(pipefd[1], STDERR_FILENO);
+        close(pipefd[1]);
+
+        // Instructions specified execvp
+        const char *args[] = {"/system/bin/sh", "-c", cmd, nullptr};
+        execvp(args[0], (char* const*)args);
+        // If execvp fails, we exit
+        exit(1);
+    } else {
+        // Parent process
+        close(pipefd[1]); // Close unused write end
+
+        // Make the read end non-blocking to prevent pipe deadlock
+        int flags = fcntl(pipefd[0], F_GETFL, 0);
+        fcntl(pipefd[0], F_SETFL, flags | O_NONBLOCK);
+
+        std::string result;
+        char buffer[1024];
+        ssize_t count;
+
+        // Wait for child process with timeout
+        int status;
+        int timeout_seconds = 60;
+        int elapsed_ms = 0;
+        bool timed_out = false;
+
+        while (true) {
+            // Drain the pipe buffer to prevent deadlock
+            while ((count = read(pipefd[0], buffer, sizeof(buffer) - 1)) > 0) {
+                buffer[count] = '\0';
+                result += buffer;
+            }
+
+            pid_t wpid = waitpid(pid, &status, WNOHANG);
+            if (wpid == pid) {
+                // Child finished
+                break;
+            } else if (wpid == -1) {
+                // Error in waitpid
+                break;
+            }
+
+            // Still running
+            if (elapsed_ms >= timeout_seconds * 1000) {
+                timed_out = true;
+                kill(pid, SIGKILL);
+                waitpid(pid, &status, 0); // Reap the process
+                break;
+            }
+
+            usleep(100000); // Sleep for 100ms
+            elapsed_ms += 100;
+        }
+
+        // Read any remaining output after child finishes
+        while ((count = read(pipefd[0], buffer, sizeof(buffer) - 1)) > 0) {
+            buffer[count] = '\0';
             result += buffer;
         }
-    } catch (...) {
-        pclose(pipe);
-        throw;
+        close(pipefd[0]);
+
+        if (timed_out) {
+            return "Error: Command execution timed out (60 seconds)";
+        }
+
+        return result;
     }
-    pclose(pipe);
-    return result;
 }
 
 extern "C" JNIEXPORT jstring JNICALL
