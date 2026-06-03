@@ -241,14 +241,14 @@ class OmniVpnService : VpnService() {
     private suspend fun startInterception(pfd: ParcelFileDescriptor) {
         val inputStream = FileInputStream(pfd.fileDescriptor)
         val outputStream = FileOutputStream(pfd.fileDescriptor)
-        val buffer = ByteBuffer.allocate(32767)
+        val buffer = ByteBuffer.allocateDirect(32767)
 
         while (scope.isActive) {
             try {
                 buffer.clear()
-                val length = inputStream.read(buffer.array())
+                val length = inputStream.channel.read(buffer)
                 if (length > 0) {
-                    buffer.limit(length)
+                    buffer.flip()
                     processPacket(buffer, length, outputStream)
                 }
             } catch (e: Exception) {
@@ -271,6 +271,13 @@ class OmniVpnService : VpnService() {
         val buffer = bufferPool.poll() ?: ByteArray(32767)
         try {
             if (length < 20) return // Min IPv4 header length
+
+            // JNI Bridge parsing and firewall logic
+            val actionCode = com.mobisec.omniip.core.NativeEngine.processPacketNative(packet, length)
+            if (actionCode == 0) {
+                return // Natively dropped
+            }
+
             val version = (packet.get(0).toInt() shr 4) and 0x0F
             if (version != 4) return // Only handle IPv4 for now
 

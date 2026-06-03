@@ -12,4 +12,5 @@ object NativeEngine {
     external fun initializeNativeEnvironment(isDebug: Boolean)
     external fun setPremiumUnlockedNative(unlocked: Boolean)
     external fun executeSecuritySweep(context: android.content.Context)
+    external fun processPacketNative(packetBuffer: java.nio.ByteBuffer, length: Int): Int
 }
