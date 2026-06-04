@@ -43,6 +43,13 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentHashMap
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
+import android.content.pm.ServiceInfo
 
 class OmniVpnService : VpnService() {
 
@@ -123,6 +130,48 @@ class OmniVpnService : VpnService() {
 
         private val _telemetryFlow = MutableSharedFlow<ConnectionTelemetry>(extraBufferCapacity = 100)
         val telemetryFlow = _telemetryFlow.asSharedFlow()
+        private const val ONGOING_NOTIFICATION_ID = 1111
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+
+        val channelId = "omni_vpn_channel"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val notificationManager = getSystemService(NotificationManager::class.java)
+            val channel = NotificationChannel(
+                channelId,
+                "Omni-IP Firewall Active",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Shows that the Omni-IP firewall is actively analyzing traffic."
+            }
+            notificationManager.createNotificationChannel(channel)
+        }
+
+        val notificationIntent = Intent(this, com.mobisec.omniip.MainActivity::class.java)
+        val pendingIntent = PendingIntent.getActivity(
+            this, 0, notificationIntent, PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification: Notification = NotificationCompat.Builder(this, channelId)
+            .setContentTitle("Omni-IP Firewall Active")
+            .setContentText("Actively analyzing network traffic.")
+            .setSmallIcon(com.mobisec.omniip.R.drawable.ic_status_alert) // fallback icon
+            .setContentIntent(pendingIntent)
+            .setOngoing(true)
+            .build()
+
+        if (Build.VERSION.SDK_INT >= 34) {
+            ServiceCompat.startForeground(
+                this,
+                ONGOING_NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            )
+        } else {
+            startForeground(ONGOING_NOTIFICATION_ID, notification)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -281,8 +330,10 @@ class OmniVpnService : VpnService() {
                 cityDbReader = DatabaseReader.Builder(cityDbFile).build()
                 asnDbReader = DatabaseReader.Builder(asnDbFile).build()
 
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to initialize GeoIP databases", e)
+            } catch (e: java.net.UnknownHostException) {
+                Log.e(TAG, "Failed to initialize GeoIP databases: UnknownHostException", e)
+            } catch (e: java.io.IOException) {
+                Log.e(TAG, "Failed to initialize GeoIP databases: IOException", e)
             }
         }
     }
@@ -345,7 +396,7 @@ class OmniVpnService : VpnService() {
         val uid = resolveUid(protocol, sourceIp, sourcePort, destIp, destPort)
 
         // Exfiltration Accounting
-        if (uid != -1) {
+        if (uid != -1 && uid != -2) {
             val metrics = exfiltrationTracker.get(uid) { ExfiltrationMetrics() }
             if (sourceIp.hostAddress == "10.0.0.2") {
                 metrics.txBytes += length // Outbound
@@ -447,8 +498,12 @@ class OmniVpnService : VpnService() {
                 }
             } catch (e: com.maxmind.geoip2.exception.AddressNotFoundException) {
                 // Ignore expected missing address exceptions
+            } catch (e: java.net.UnknownHostException) {
+                Log.e(TAG, "UnknownHostException resolving GeoIP for target: $targetIp", e)
+                countryName = "GeoIP Error"
             } catch (e: java.io.IOException) {
                 Log.e(TAG, "IOException resolving GeoIP for target: $targetIp", e)
+                countryName = "GeoIP Error"
             }
 
 val targetIpString = targetIp.hostAddress ?: ""
@@ -640,16 +695,23 @@ val targetIpString = targetIp.hostAddress ?: ""
                 val local = InetSocketAddress(sourceIp, sourcePort)
                 val remote = InetSocketAddress(destIp, destPort)
                 return (getSystemService(android.net.ConnectivityManager::class.java)).getConnectionOwnerUid(protocol, local, remote)
-            } catch (e: Exception) {
-                // Return -1 on error
+            } catch (e: android.os.RemoteException) {
+                Log.e(TAG, "RemoteException resolving UID", e)
+                return -2
+            } catch (e: java.lang.SecurityException) {
+                Log.e(TAG, "SecurityException resolving UID", e)
+                return -2
             }
         } else {
             return LegacyUidResolver.resolveUid(protocol, sourcePort)
         }
-        return -1
     }
 
     private fun getAppInfo(uid: Int): Triple<String, String, Drawable?> {
+        if (uid == -2) {
+            return Triple("Error", "uid:error", null)
+        }
+
         if (appInfoCache.getIfPresent(uid) != null) {
             return appInfoCache.getIfPresent(uid)!!
         }
