@@ -32,7 +32,8 @@ fun ToolkitScreen(navController: NavController) {
         "Router Setup" to "router",
         "IP Converter" to "ipconv",
         "WiFi Scanner" to "wifi",
-        "Network Stats" to "netstats"
+        "Network Stats" to "netstats",
+        "DNS Threat Feeds" to "dnsthreats"
     )
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {

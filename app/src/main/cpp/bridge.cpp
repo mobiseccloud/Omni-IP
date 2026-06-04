@@ -38,6 +38,9 @@ struct FirewallRule {
 static std::unordered_map<uint64_t, FirewallRule> g_native_rule_cache;
 static std::shared_mutex g_rule_mutex;
 
+static std::unordered_map<uint64_t, bool> g_dns_blocklist;
+static std::shared_mutex g_dns_blocklist_mutex;
+
 // Basic bloom filter structure for fast native checking
 static jlong* g_threat_bloom_array = nullptr;
 static jsize g_threat_bloom_len = 0;
@@ -738,6 +741,9 @@ Java_com_mobisec_omniip_core_NativeEngine_processPacketNative(
     uint8_t version_ihl;
     std::memcpy(&version_ihl, rawData, sizeof(uint8_t));
     uint8_t version = version_ihl >> 4;
+    if (version == 6) {
+        return 0; // DROP IPv6 immediately to safely blackhole it
+    }
     if (version != 4) {
         return 1; // ALLOW non-IPv4 for now to let Kotlin side handle or ignore
     }
@@ -813,5 +819,236 @@ Java_com_mobisec_omniip_core_NativeEngine_processPacketNative(
         }
     }
 
+    // Step 5: C++ DNS SINKHOLING ENGINE
+    if (protocol == 17 && dest_port == 53) {
+        // DNS UDP Query
+        int payload_offset = header_len + sizeof(TCPUDPHeader);
+        if (length > payload_offset + 12) { // 12 bytes DNS header
+            const uint8_t* dns_header = rawData + payload_offset;
+            // Basic check for Query
+            uint16_t flags;
+            std::memcpy(&flags, dns_header + 2, sizeof(uint16_t));
+            flags = ntohs(flags);
+            if ((flags & 0x8000) == 0) { // QR bit = 0 (Query)
+                // Read QNAME
+                int qname_offset = payload_offset + 12;
+                char extracted_domain[256];
+                int ext_idx = 0;
+                int current_offset = qname_offset;
+                bool valid = true;
+
+                while (current_offset < length) {
+                    uint8_t label_len = rawData[current_offset];
+                    if (label_len == 0) break;
+                    if ((label_len & 0xC0) == 0xC0) {
+                        // Compression pointer not supported in simple extraction for now
+                        break;
+                    }
+                    if (current_offset + 1 + label_len > length || ext_idx + label_len + 1 >= 256) {
+                        valid = false;
+                        break;
+                    }
+                    if (ext_idx > 0) {
+                        extracted_domain[ext_idx++] = '.';
+                    }
+                    for (int i = 0; i < label_len; i++) {
+                        extracted_domain[ext_idx++] = tolower(rawData[current_offset + 1 + i]);
+                    }
+                    current_offset += 1 + label_len;
+                }
+
+                if (valid && ext_idx > 0) {
+                    extracted_domain[ext_idx] = '\0';
+                    // MurmurHash3 simplified for string to uint64_t
+                    uint64_t h1 = 0;
+                    uint64_t h2 = 0;
+                    const uint64_t c1 = 0x87c37b91114253d5ULL;
+                    const uint64_t c2 = 0x4cf5ad432745937fULL;
+
+                    int len = ext_idx;
+                    const uint8_t * data = (const uint8_t*)extracted_domain;
+                    const int nblocks = len / 16;
+
+                    const uint64_t * blocks = (const uint64_t *)(data);
+
+                    for(int i = 0; i < nblocks; i++) {
+                        uint64_t k1 = blocks[i*2+0];
+                        uint64_t k2 = blocks[i*2+1];
+
+                        k1 *= c1;
+                        k1 = (k1 << 31) | (k1 >> (64 - 31));
+                        k1 *= c2;
+                        h1 ^= k1;
+
+                        h1 = (h1 << 27) | (h1 >> (64 - 27));
+                        h1 += h2;
+                        h1 = h1 * 5 + 0x52dce729;
+
+                        k2 *= c2;
+                        k2 = (k2 << 33) | (k2 >> (64 - 33));
+                        k2 *= c1;
+                        h2 ^= k2;
+
+                        h2 = (h2 << 31) | (h2 >> (64 - 31));
+                        h2 += h1;
+                        h2 = h2 * 5 + 0x38495ab5;
+                    }
+
+                    const uint8_t * tail = (const uint8_t*)(data + nblocks * 16);
+                    uint64_t k1 = 0;
+                    uint64_t k2 = 0;
+
+                    switch(len & 15) {
+                    case 15: k2 ^= ((uint64_t)tail[14]) << 48;
+                    case 14: k2 ^= ((uint64_t)tail[13]) << 40;
+                    case 13: k2 ^= ((uint64_t)tail[12]) << 32;
+                    case 12: k2 ^= ((uint64_t)tail[11]) << 24;
+                    case 11: k2 ^= ((uint64_t)tail[10]) << 16;
+                    case 10: k2 ^= ((uint64_t)tail[ 9]) << 8;
+                    case  9: k2 ^= ((uint64_t)tail[ 8]) << 0;
+                             k2 *= c2; k2 = (k2 << 33) | (k2 >> (64 - 33)); k2 *= c1; h2 ^= k2;
+
+                    case  8: k1 ^= ((uint64_t)tail[ 7]) << 56;
+                    case  7: k1 ^= ((uint64_t)tail[ 6]) << 48;
+                    case  6: k1 ^= ((uint64_t)tail[ 5]) << 40;
+                    case  5: k1 ^= ((uint64_t)tail[ 4]) << 32;
+                    case  4: k1 ^= ((uint64_t)tail[ 3]) << 24;
+                    case  3: k1 ^= ((uint64_t)tail[ 2]) << 16;
+                    case  2: k1 ^= ((uint64_t)tail[ 1]) << 8;
+                    case  1: k1 ^= ((uint64_t)tail[ 0]) << 0;
+                             k1 *= c1; k1 = (k1 << 31) | (k1 >> (64 - 31)); k1 *= c2; h1 ^= k1;
+                    };
+
+                    h1 ^= len;
+                    h2 ^= len;
+                    h1 += h2;
+                    h2 += h1;
+
+                    auto fmix64 = [](uint64_t k) {
+                        k ^= k >> 33;
+                        k *= 0xff51afd7ed558ccdULL;
+                        k ^= k >> 33;
+                        k *= 0xc4ceb9fe1a85ec53ULL;
+                        k ^= k >> 33;
+                        return k;
+                    };
+
+                    h1 = fmix64(h1);
+                    h2 = fmix64(h2);
+
+                    h1 += h2;
+                    h2 += h1;
+
+                    uint64_t domain_hash = h1; // use half of 128-bit hash
+
+                    std::shared_lock<std::shared_mutex> dns_lock(g_dns_blocklist_mutex);
+                    if (g_dns_blocklist.find(domain_hash) != g_dns_blocklist.end()) {
+                        dns_lock.unlock();
+
+                        // Construct Sinkhole Response directly in the buffer
+                        // Swap IP addresses
+                        uint32_t src_ip_raw;
+                        std::memcpy(&src_ip_raw, rawData + offsetof(IPv4Header, src_ip), sizeof(uint32_t));
+
+                        // we need to modify the buffer directly so we cast to non-const,
+                        // env->GetDirectBufferAddress provides a void* so we can cast to uint8_t*
+                        uint8_t* mutableData = static_cast<uint8_t*>(bufferPtr);
+
+                        std::memcpy(mutableData + offsetof(IPv4Header, dest_ip), &src_ip_raw, sizeof(uint32_t));
+                        std::memcpy(mutableData + offsetof(IPv4Header, src_ip), &dest_ip_raw, sizeof(uint32_t));
+
+                        // Swap UDP Ports
+                        uint16_t src_port_raw;
+                        std::memcpy(&src_port_raw, mutableData + header_len + offsetof(TCPUDPHeader, src_port), sizeof(uint16_t));
+                        uint16_t dst_port_raw;
+                        std::memcpy(&dst_port_raw, mutableData + header_len + offsetof(TCPUDPHeader, dest_port), sizeof(uint16_t));
+
+                        std::memcpy(mutableData + header_len + offsetof(TCPUDPHeader, dest_port), &src_port_raw, sizeof(uint16_t));
+                        std::memcpy(mutableData + header_len + offsetof(TCPUDPHeader, src_port), &dst_port_raw, sizeof(uint16_t));
+
+                        // Modify DNS Header for Response
+                        uint8_t* dns = mutableData + payload_offset;
+                        uint16_t q_flags;
+                        std::memcpy(&q_flags, dns + 2, sizeof(uint16_t));
+                        q_flags = ntohs(q_flags);
+                        q_flags |= 0x8000; // Set QR to 1 (Response)
+                        q_flags = htons(q_flags);
+                        std::memcpy(dns + 2, &q_flags, sizeof(uint16_t));
+
+                        // ANCOUNT = 1
+                        uint16_t ancount = htons(1);
+                        std::memcpy(dns + 6, &ancount, sizeof(uint16_t));
+
+                        // Build DNS Answer
+                        // Find end of query
+                        int answer_offset = current_offset + 5; // Skip zero byte (1), QTYPE (2) and QCLASS (2)
+                        if (answer_offset + 16 <= length) {
+
+                            // Name: Pointer to QNAME (0xC00C)
+                            uint16_t name_ptr = htons(0xC00C);
+                            std::memcpy(mutableData + answer_offset, &name_ptr, sizeof(uint16_t));
+                            answer_offset += 2;
+
+                            // Type A (1)
+                            uint16_t type_a = htons(1);
+                            std::memcpy(mutableData + answer_offset, &type_a, sizeof(uint16_t));
+                            answer_offset += 2;
+
+                            // Class IN (1)
+                            uint16_t class_in = htons(1);
+                            std::memcpy(mutableData + answer_offset, &class_in, sizeof(uint16_t));
+                            answer_offset += 2;
+
+                            // TTL (300)
+                            uint32_t ttl = htonl(300);
+                            std::memcpy(mutableData + answer_offset, &ttl, sizeof(uint32_t));
+                            answer_offset += 4;
+
+                            // RDLENGTH (4)
+                            uint16_t rdlength = htons(4);
+                            std::memcpy(mutableData + answer_offset, &rdlength, sizeof(uint16_t));
+                            answer_offset += 2;
+
+                            // RDATA (0.0.0.0)
+                            uint32_t sinkhole_ip = 0;
+                            std::memcpy(mutableData + answer_offset, &sinkhole_ip, sizeof(uint32_t));
+                            answer_offset += 4;
+
+                            int new_length = answer_offset;
+
+                            // Update IP and UDP lengths
+                            uint16_t new_ip_len = htons(new_length);
+                            std::memcpy(mutableData + offsetof(IPv4Header, total_length), &new_ip_len, sizeof(uint16_t));
+
+                            uint16_t new_udp_len = htons(new_length - header_len);
+                            std::memcpy(mutableData + header_len + 4, &new_udp_len, sizeof(uint16_t));
+
+                            return (new_length << 8) | 3;
+                        } else {
+                           return 0; // Drop if not enough space for sinkhole response
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     return 1; // ALLOW
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_mobisec_omniip_core_NativeEngine_syncDnsBlocklist(
+        JNIEnv* env,
+        jobject /* this */,
+        jlongArray domainHashes) {
+    std::unique_lock<std::shared_mutex> lock(g_dns_blocklist_mutex);
+    g_dns_blocklist.clear();
+    if (domainHashes != nullptr) {
+        jsize len = env->GetArrayLength(domainHashes);
+        jlong* elements = env->GetLongArrayElements(domainHashes, nullptr);
+        for (int i = 0; i < len; ++i) {
+            g_dns_blocklist[(uint64_t)elements[i]] = true;
+        }
+        env->ReleaseLongArrayElements(domainHashes, elements, JNI_ABORT);
+    }
 }
