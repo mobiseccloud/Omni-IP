@@ -237,6 +237,7 @@ class MainActivity : ComponentActivity() {
                             val metrics by OmniVpnService.currentTargetMetricsFlow.collectAsState()
                             val activeApps by OmniVpnService.activeAppsFlow.collectAsState()
 
+                            val isFirewallActive by dashboardViewModel.isFirewallActive.collectAsState()
                             DashboardScreen(
                                 targetIp = targetIp,
                                 initialAction = initialAction,
@@ -248,6 +249,7 @@ class MainActivity : ComponentActivity() {
                                 rxBytes = metrics.rxBytes,
                                 txBytes = metrics.txBytes,
                                 activeApps = activeApps,
+                                isFirewallActive = isFirewallActive,
                                 onExecuteAction = { ip, action -> dashboardViewModel.executeAction(ip, action) },
                                 onToggleRecording = { start, uid ->
                                     if (start) {
@@ -255,6 +257,9 @@ class MainActivity : ComponentActivity() {
                                     } else {
                                         stopPcapRecording()
                                     }
+                                },
+                                onToggleFirewall = { isActive ->
+                                    dashboardViewModel.setFirewallActive(isActive)
                                 }
                             )
                             } else if (currentTab == 5) {

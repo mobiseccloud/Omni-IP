@@ -17,6 +17,15 @@ import androidx.compose.ui.Alignment
 import com.mobisec.omniip.ui.theme.AlertRed
 import androidx.compose.animation.core.*
 
+
+import androidx.compose.ui.platform.LocalContext
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.content.Intent
+import android.net.VpnService
+import com.mobisec.omniip.vpn.OmniVpnService
+
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(
@@ -30,12 +39,27 @@ fun DashboardScreen(
     rxBytes: Long,
     txBytes: Long,
     activeApps: List<Pair<Int, String>>,
+    isFirewallActive: Boolean = false,
     onExecuteAction: (String, String) -> Unit, // (ip, actionName)
-    onToggleRecording: (Boolean, Int?) -> Unit
+    onToggleRecording: (Boolean, Int?) -> Unit,
+    onToggleFirewall: (Boolean) -> Unit = {}
 ) {
     var ipInput by remember { mutableStateOf(targetIp) }
     var actionInput by remember { mutableStateOf(initialAction) }
     var showAppSelectionSheet by remember { mutableStateOf(false) }
+
+    val context = LocalContext.current
+    val vpnLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val intent = Intent(context, OmniVpnService::class.java)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+            onToggleFirewall(true)
+        }
+    }
 
     LaunchedEffect(initialAction, targetIp) {
         if (targetIp.isNotEmpty() && initialAction.isNotEmpty() && initialAction != "NONE") {
@@ -56,6 +80,56 @@ fun DashboardScreen(
     )
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+        // Tactical Toggle Component
+        Card(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = if (isFirewallActive) "FIREWALL: ENGAGED" else "FIREWALL: STANDBY",
+                    color = if (isFirewallActive) MatrixGreen else Color.DarkGray,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Bold,
+                    fontSize = 18.sp
+                )
+                Switch(
+                    checked = isFirewallActive,
+                    onCheckedChange = { isChecked ->
+                        if (isChecked) {
+                            val intent = VpnService.prepare(context)
+                            if (intent != null) {
+                                vpnLauncher.launch(intent)
+                            } else {
+                                val startIntent = Intent(context, OmniVpnService::class.java)
+                                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                                    context.startForegroundService(startIntent)
+                                } else {
+                                    context.startService(startIntent)
+                                }
+                                onToggleFirewall(true)
+                            }
+                        } else {
+                            val stopIntent = Intent(context, OmniVpnService::class.java).apply {
+                                action = OmniVpnService.ACTION_STOP_VPN
+                            }
+                            context.startService(stopIntent)
+                            onToggleFirewall(false)
+                        }
+                    },
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = MatrixGreen,
+                        checkedTrackColor = MatrixGreen.copy(alpha = 0.5f),
+                        uncheckedThumbColor = Color.Gray,
+                        uncheckedTrackColor = Color.DarkGray
+                    )
+                )
+            }
+        }
+
         if (isRecording) {
             Card(
                 modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),

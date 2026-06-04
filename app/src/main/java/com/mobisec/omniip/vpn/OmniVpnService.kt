@@ -105,6 +105,7 @@ class OmniVpnService : VpnService() {
 
     companion object {
         private const val TAG = "OmniVpnService"
+        const val ACTION_STOP_VPN = "com.mobisec.omniip.ACTION_STOP_VPN"
 
         // Pcap Integration
         var activePcapWriter: PcapWriter? = null
@@ -175,6 +176,12 @@ class OmniVpnService : VpnService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP_VPN) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
         if (vpnInterface != null) return START_STICKY
 
         val builder = Builder()
