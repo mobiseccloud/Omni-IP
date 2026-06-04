@@ -40,6 +40,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.cancel
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.net.DatagramPacket
@@ -910,6 +911,7 @@ val targetIpString = targetIp.hostAddress ?: ""
 
         super.onDestroy()
         vpnJob?.cancel()
+        scope.cancel()
         vpnInterface?.close()
         vpnInterface = null
         try {
