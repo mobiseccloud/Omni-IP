@@ -37,6 +37,12 @@ class RulesViewModel(application: Application) : AndroidViewModel(application) {
             dao.updateRule(rule.copy(action = newAction))
         }
     }
+    fun updateRuleContext(rule: FirewallRule, blockWifi: Boolean, blockMobile: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            dao.updateRule(rule.copy(blockWifi = blockWifi, blockMobile = blockMobile))
+        }
+    }
+
 
     fun addManualRule(rule: FirewallRule): Boolean {
         val existingValues = _rules.value.map { it.targetValue }.toSet()

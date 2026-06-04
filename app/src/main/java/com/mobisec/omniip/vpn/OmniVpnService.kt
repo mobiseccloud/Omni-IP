@@ -4,6 +4,11 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.drawable.Drawable
 import android.net.VpnService
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
+
 import android.net.Uri
 import kotlinx.coroutines.delay
 import android.os.Build
@@ -52,6 +57,10 @@ import androidx.core.app.ServiceCompat
 import android.content.pm.ServiceInfo
 
 class OmniVpnService : VpnService() {
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    @Volatile private var isCellularActive = false
+    private val _networkChangeTrigger = kotlinx.coroutines.flow.MutableStateFlow(0)
+
 
     private var vpnInterface: ParcelFileDescriptor? = null
     private var vpnJob: Job? = null
@@ -135,6 +144,24 @@ class OmniVpnService : VpnService() {
     }
 
     override fun onCreate() {
+        val connectivityManager = getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        networkCallback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                val caps = connectivityManager.getNetworkCapabilities(network)
+                if (caps != null) {
+                    isCellularActive = caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
+                    setUnderlyingNetworks(arrayOf(network))
+                    _networkChangeTrigger.value++
+                }
+            }
+            override fun onCapabilitiesChanged(network: Network, networkCapabilities: NetworkCapabilities) {
+                isCellularActive = networkCapabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
+                _networkChangeTrigger.value++
+            }
+        }
+
+        connectivityManager.registerDefaultNetworkCallback(networkCallback!!)
+
         super.onCreate()
 
         val channelId = "omni_vpn_channel"
@@ -219,10 +246,16 @@ class OmniVpnService : VpnService() {
         }
 
         scope.launch(Dispatchers.IO) {
-            AppDatabase.getDatabase(this@OmniVpnService).firewallRuleDao().getAllRules().collect { rules ->
+            kotlinx.coroutines.flow.combine(
+                AppDatabase.getDatabase(this@OmniVpnService).firewallRuleDao().getAllRules(),
+                _networkChangeTrigger
+            ) { rules, _ -> rules }.collect { rules ->
                 ruleCache.invalidateAll()
                 com.mobisec.omniip.core.NativeEngine.clearNativeRules()
                 for (rule in rules) {
+                    if (isCellularActive && !rule.blockMobile) continue
+                    if (!isCellularActive && !rule.blockWifi) continue
+
                     val key = "${rule.targetType.name}:${rule.targetValue}"
                     ruleCache.put(key, rule.action)
 
@@ -870,6 +903,11 @@ val targetIpString = targetIp.hostAddress ?: ""
 
 
     override fun onDestroy() {
+        networkCallback?.let {
+            val connectivityManager = getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            connectivityManager.unregisterNetworkCallback(it)
+        }
+
         super.onDestroy()
         vpnJob?.cancel()
         vpnInterface?.close()

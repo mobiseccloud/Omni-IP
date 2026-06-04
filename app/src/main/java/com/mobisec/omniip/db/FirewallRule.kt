@@ -17,5 +17,7 @@ data class FirewallRule(
     val targetType: TargetType,
     val targetValue: String,
     val action: Action,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val blockWifi: Boolean = true,
+    val blockMobile: Boolean = true
 )

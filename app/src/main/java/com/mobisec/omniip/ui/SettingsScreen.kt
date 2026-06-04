@@ -20,6 +20,10 @@ import com.mobisec.omniip.ui.theme.MatrixGreen
 import com.mobisec.omniip.ui.theme.TacticalAmber
 import com.mobisec.omniip.ui.theme.SurfaceDark
 import java.io.File
+import android.os.PowerManager
+import android.provider.Settings
+import android.net.Uri
+
 
 @Composable
 fun SettingsScreen() {
@@ -43,6 +47,11 @@ fun SettingsScreen() {
 
     val securityPrefs = remember { com.mobisec.omniip.core.SecurityPreferences(context) }
     val coroutineScope = rememberCoroutineScope()
+
+    val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+    val isIgnoringBatteryOptimizations by remember { mutableStateOf(powerManager.isIgnoringBatteryOptimizations(context.packageName)) }
+
+
     var pinLockEnabled by remember { mutableStateOf(securityPrefs.isPinLockEnabled()) }
     var showSetPinDialog by remember { mutableStateOf(false) }
     var showRemovePinDialog by remember { mutableStateOf(false) }
@@ -160,8 +169,34 @@ fun SettingsScreen() {
         Text("Firewall Boot Persistence", fontSize = 20.sp, color = MatrixGreen)
         Spacer(modifier = Modifier.height(16.dp))
 
+
+        if (!isIgnoringBatteryOptimizations) {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp),
+                colors = CardDefaults.cardColors(containerColor = TacticalAmber.copy(alpha = 0.2f))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text("Warning: Doze Mode may kill the firewall.", color = TacticalAmber, fontSize = 16.sp)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                data = Uri.parse("package:${context.packageName}")
+                            }
+                            context.startActivity(intent)
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = TacticalAmber)
+                    ) {
+                        Text("Allow Background Execution (Recommended)", color = SurfaceDark)
+                    }
+                }
+            }
+        }
+
         Card(modifier = Modifier.fillMaxWidth()) {
+
             Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+
                 Text("Firewall Auto-Start on Boot", modifier = Modifier.weight(1f), fontSize = 16.sp)
                 Switch(
                     checked = autoStartEnabled,
