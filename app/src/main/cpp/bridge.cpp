@@ -1,6 +1,8 @@
 #include "security_config.h"
 #include <jni.h>
 #include <string>
+#include <shared_mutex>
+#include <atomic>
 
 // Simulating Nmap and Ping Execution via JNI Bridge
 // In a real scenario, this would use fork/exec or link against the native engines.
@@ -33,14 +35,14 @@ struct FirewallRule {
     int action_code; // 0 = DROP, 1 = ALLOW, 2 = FLAG
 };
 
-static std::unordered_map<std::string, FirewallRule> g_native_rule_cache;
-static std::mutex g_rule_mutex;
+static std::unordered_map<uint64_t, FirewallRule> g_native_rule_cache;
+static std::shared_mutex g_rule_mutex;
 
 // Basic bloom filter structure for fast native checking
 static jlong* g_threat_bloom_array = nullptr;
 static jsize g_threat_bloom_len = 0;
 static int g_threat_hash_count = 0;
-static std::mutex g_threat_bloom_mutex;
+static std::shared_mutex g_threat_bloom_mutex;
 
 struct IPv4Header {
     uint8_t version_ihl;
@@ -519,8 +521,8 @@ void verifyApkSignature(JNIEnv* env, jobject context) {
     }
 }
 
-static uint32_t g_text_segment_baseline_hash = 0;
-static bool g_is_text_segment_baseline_set = false;
+static std::atomic<uint64_t> g_text_segment_baseline_hash{0};
+static std::atomic<bool> g_is_text_segment_baseline_set{false};
 
 uint32_t djb2_hash(const uint8_t* data, size_t length) {
     uint32_t hash = 5381;
@@ -672,20 +674,18 @@ Java_com_mobisec_omniip_core_NativeEngine_updateNativeRule(
         jint ip,
         jint port,
         jint action) {
-    const char *keyStr = env->GetStringUTFChars(key, 0);
-    std::string key_str(keyStr);
+    // The primitive key is calculated from the passed IP and port, bypassing string usage
+    uint64_t rule_key = ((uint64_t)static_cast<uint32_t>(ip) << 16) | static_cast<uint16_t>(port);
 
-    std::unique_lock<std::mutex> lock(g_rule_mutex);
-    g_native_rule_cache[key_str] = {static_cast<uint32_t>(ip), static_cast<uint16_t>(port), action};
-
-    env->ReleaseStringUTFChars(key, keyStr);
+    std::unique_lock<std::shared_mutex> lock(g_rule_mutex);
+    g_native_rule_cache[rule_key] = {static_cast<uint32_t>(ip), static_cast<uint16_t>(port), action};
 }
 
 extern "C" __attribute__ ((visibility ("default"))) JNIEXPORT void JNICALL
 Java_com_mobisec_omniip_core_NativeEngine_clearNativeRules(
         JNIEnv* env,
         jobject /* this */) {
-    std::unique_lock<std::mutex> lock(g_rule_mutex);
+    std::unique_lock<std::shared_mutex> lock(g_rule_mutex);
     g_native_rule_cache.clear();
 }
 
@@ -695,7 +695,7 @@ Java_com_mobisec_omniip_core_NativeEngine_syncThreatBloomFilter(
         jobject /* this */,
         jlongArray bitArray,
         jint hashCount) {
-    std::lock_guard<std::mutex> lock(g_threat_bloom_mutex);
+    std::unique_lock<std::shared_mutex> lock(g_threat_bloom_mutex);
 
     if (g_threat_bloom_array != nullptr) {
         delete[] g_threat_bloom_array;
@@ -747,19 +747,29 @@ Java_com_mobisec_omniip_core_NativeEngine_processPacketNative(
         return 0; // DROP
     }
 
-    uint8_t protocol = ipHeader->protocol;
-    uint32_t dest_ip = ntohl(ipHeader->dest_ip);
-    char dest_ip_str[INET_ADDRSTRLEN];
-    struct in_addr ip_addr;
-    ip_addr.s_addr = ipHeader->dest_ip; // Keep in network byte order for inet_ntoa
-    inet_ntop(AF_INET, &ip_addr, dest_ip_str, INET_ADDRSTRLEN);
+    uint8_t protocol;
+    std::memcpy(&protocol, rawData + offsetof(IPv4Header, protocol), sizeof(uint8_t));
 
-    // Step 1: Lock the rule cache using a shared or standard mutex lock.
-    std::unique_lock<std::mutex> lock(g_rule_mutex);
+    uint32_t dest_ip_raw;
+    std::memcpy(&dest_ip_raw, rawData + offsetof(IPv4Header, dest_ip), sizeof(uint32_t));
+    uint32_t dest_ip = ntohl(dest_ip_raw);
+
+    uint16_t dest_port = 0;
+    if (protocol == 6 || protocol == 17) { // TCP or UDP
+        if (length >= header_len + sizeof(TCPUDPHeader)) {
+            uint16_t dest_port_raw;
+            std::memcpy(&dest_port_raw, rawData + header_len + offsetof(TCPUDPHeader, dest_port), sizeof(uint16_t));
+            dest_port = ntohs(dest_port_raw);
+        }
+    }
+
+    uint64_t rule_key = ((uint64_t)dest_ip << 16) | dest_port;
+
+    // Step 1: Lock the rule cache using a shared mutex lock.
+    std::shared_lock<std::shared_mutex> lock(g_rule_mutex);
 
     // Step 2: Check if the destination matches an entry in g_native_rule_cache.
-    std::string ip_key = std::string(DECRYPT_STR_STATIC("IP_ADDRESS:").c_str()) + std::string(dest_ip_str);
-    auto it = g_native_rule_cache.find(ip_key);
+    auto it = g_native_rule_cache.find(rule_key);
     if (it != g_native_rule_cache.end()) {
         int action = it->second.action_code;
         if (action == 0) return 0; // DROP
@@ -771,41 +781,28 @@ Java_com_mobisec_omniip_core_NativeEngine_processPacketNative(
     lock.unlock();
 
     // Step 3: Check native threat Bloom filter
-    std::unique_lock<std::mutex> bloom_lock(g_threat_bloom_mutex);
+    std::shared_lock<std::shared_mutex> bloom_lock(g_threat_bloom_mutex);
     if (g_threat_bloom_array != nullptr && g_threat_bloom_len > 0) {
-        // Implement a simple hash check for the IP string
-        // We'd typically use MurmurHash3 like Guava does.
-        // For demonstration, since Guava Bloom filter format is complex, we will assume
-        // a simple matching logic or if it was mapped via bitArray.
-        // In reality, to be fully compatible with Guava's Bloom filter saved to threat_bloom.bin,
-        // we would need Guava's exact MurmurHash3_128 implementation.
-        // The prompt says "using standard fast hashing (e.g., MurmurHash or a simple multi-index hash array) to evaluate IP matches in O(1) time."
-
-        // Simple hash check using string characters (mock implementation)
+        // Implement a simple hash check for the primitive IP
         unsigned long hash = 5381;
-        for (char c : std::string(dest_ip_str)) {
-            hash = ((hash << 5) + hash) + c; // hash * 33 + c
-        }
+        hash = ((hash << 5) + hash) + (dest_ip & 0xFF);
+        hash = ((hash << 5) + hash) + ((dest_ip >> 8) & 0xFF);
+        hash = ((hash << 5) + hash) + ((dest_ip >> 16) & 0xFF);
+        hash = ((hash << 5) + hash) + ((dest_ip >> 24) & 0xFF);
 
         int bit_index = hash % (g_threat_bloom_len * 64);
         int long_index = bit_index / 64;
         int bit_offset = bit_index % 64;
 
         if ((g_threat_bloom_array[long_index] & (1ULL << bit_offset)) != 0) {
-            // Found in bloom filter (mock)
-            // Return 0 or 2 based on system configurations. Let's return 0 (DROP).
-            // (Assuming DROP for simplicity, or 2 for FLAG)
             return 0; // DROP
         }
     }
     bloom_lock.unlock();
 
+    // Step 4: Integrate verification checks (Unauthorized deep scan pattern)
     if (protocol == 6 || protocol == 17) { // TCP or UDP
         if (length >= header_len + sizeof(TCPUDPHeader)) {
-            const TCPUDPHeader* transportHeader = reinterpret_cast<const TCPUDPHeader*>(rawData + header_len);
-            uint16_t dest_port = ntohs(transportHeader->dest_port);
-
-            // Step 4: Integrate verification checks (Unauthorized deep scan pattern)
             if (dest_port == 0) {
                 if ((g_auth_state & FLAG_PREMIUM) == 0 && (g_auth_state & FLAG_DEBUG) == 0) {
                      return 0; // DROP
