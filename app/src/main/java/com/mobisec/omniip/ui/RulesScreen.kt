@@ -27,6 +27,7 @@ import android.provider.Settings
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.ui.draw.scale
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -186,12 +187,34 @@ fun RuleItem(rule: FirewallRule, viewModel: RulesViewModel) {
                 Text(text = "Type: ${rule.targetType.name}", color = TextSecondary, fontSize = 12.sp)
                 Text(text = rule.targetValue, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold, fontSize = 16.sp)
             }
-            val color = when (rule.action) {
-                Action.BLOCK -> AlertRed
-                Action.FLAG -> TacticalAmber
-                Action.IGNORE -> MatrixGreen
+            Column(horizontalAlignment = Alignment.End) {
+                val color = when (rule.action) {
+                    Action.BLOCK -> AlertRed
+                    Action.FLAG -> TacticalAmber
+                    Action.IGNORE -> MatrixGreen
+                }
+                Text(text = rule.action.name, color = color, fontWeight = FontWeight.Bold)
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("WIFI", color = if (rule.blockWifi) AlertRed else TextSecondary, fontSize = 10.sp)
+                    Switch(
+                        checked = rule.blockWifi,
+                        onCheckedChange = {
+                            viewModel.updateRuleContext(rule, it, rule.blockMobile)
+                        },
+                        modifier = Modifier.scale(0.6f)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("CELL", color = if (rule.blockMobile) AlertRed else TextSecondary, fontSize = 10.sp)
+                    Switch(
+                        checked = rule.blockMobile,
+                        onCheckedChange = {
+                            viewModel.updateRuleContext(rule, rule.blockWifi, it)
+                        },
+                        modifier = Modifier.scale(0.6f)
+                    )
+                }
             }
-            Text(text = rule.action.name, color = color, fontWeight = FontWeight.Bold)
 
             if (rule.targetType == TargetType.APPLICATION) {
                 IconButton(onClick = {
