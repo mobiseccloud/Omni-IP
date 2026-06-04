@@ -12,6 +12,7 @@ plugins {
 android {
     namespace = "com.mobisec.omniip"
     compileSdk = 34
+    ndkVersion = "27.0.12077973"
 
     defaultConfig {
         applicationId = "com.mobisec.omniip"
@@ -74,10 +75,14 @@ android {
 
         val taskName = "generate${variantName}SecurityConfig"
         val generateTask = tasks.register(taskName) {
-            val outFile = project.file("src/main/cpp/security_config.h")
+            val outDir = project.file("build/generated/source/security")
+            val outFile = project.file("build/generated/source/security/security_config.h")
             outputs.file(outFile)
 
             doLast {
+                if (!outDir.exists()) {
+                    outDir.mkdirs()
+                }
                 val hashArray = if (signingConfig != null && signingConfig.storeFile != null && signingConfig.storeFile!!.exists()) {
                     val ks = KeyStore.getInstance(KeyStore.getDefaultType())
                     val pass = signingConfig.storePassword ?: ""
@@ -116,11 +121,15 @@ android {
             }
         }
 
-        // Must run before configure cmake
-        project.tasks.configureEach {
-            if (this.name == "generateJsonModel$variantName" || this.name == "externalNativeBuild$variantName") {
-                this.dependsOn(generateTask)
-            }
+    }
+}
+
+tasks.whenTaskAdded {
+    if (name.contains("externalNativeBuild") || name.contains("configureCMake") || name.contains("generateJsonModel")) {
+        if (name.contains("Debug", ignoreCase = true)) {
+            dependsOn("generateDebugSecurityConfig")
+        } else if (name.contains("Release", ignoreCase = true)) {
+            dependsOn("generateReleaseSecurityConfig")
         }
     }
 }
