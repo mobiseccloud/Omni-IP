@@ -18,6 +18,16 @@ class SecurityPreferences(context: Context) {
         EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
     )
 
+    fun isAutoStartEnabled(): Boolean {
+        return sharedPreferences.getBoolean("is_auto_start_enabled", false)
+    }
+
+    fun setAutoStartEnabled(enabled: Boolean) {
+        sharedPreferences.edit()
+            .putBoolean("is_auto_start_enabled", enabled)
+            .apply()
+    }
+
     fun isPinLockEnabled(): Boolean {
         return sharedPreferences.getBoolean("is_pin_lock_enabled", false)
     }

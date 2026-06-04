@@ -37,4 +37,65 @@ class RulesViewModel(application: Application) : AndroidViewModel(application) {
             dao.updateRule(rule.copy(action = newAction))
         }
     }
+
+    fun addManualRule(rule: FirewallRule): Boolean {
+        val existingValues = _rules.value.map { it.targetValue }.toSet()
+        if (existingValues.contains(rule.targetValue)) {
+            return false
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            dao.insertRule(rule)
+            syncRuleToNative(rule)
+        }
+        return true
+    }
+
+    fun importRules(newRules: List<FirewallRule>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            newRules.forEach { rule ->
+                dao.insertRule(rule)
+                syncRuleToNative(rule)
+            }
+        }
+    }
+
+    private fun syncRuleToNative(rule: FirewallRule) {
+        try {
+            var ipInt = 0
+            var portInt = 0
+            val key = rule.targetValue
+            if (rule.targetType == com.mobisec.omniip.db.TargetType.IP_ADDRESS) {
+                if (key.contains(":")) {
+                    val parts = key.split(":")
+                    val ipStr = parts[0]
+                    portInt = parts[1].toInt()
+                    val ipAddr = java.net.InetAddress.getByName(ipStr)
+                    val bytes = ipAddr.address
+                    if (bytes.size == 4) {
+                        ipInt = ((bytes[0].toInt() and 0xFF) shl 24) or
+                                ((bytes[1].toInt() and 0xFF) shl 16) or
+                                ((bytes[2].toInt() and 0xFF) shl 8) or
+                                (bytes[3].toInt() and 0xFF)
+                    }
+                } else {
+                    val ipAddr = java.net.InetAddress.getByName(key)
+                    val bytes = ipAddr.address
+                    if (bytes.size == 4) {
+                        ipInt = ((bytes[0].toInt() and 0xFF) shl 24) or
+                                ((bytes[1].toInt() and 0xFF) shl 16) or
+                                ((bytes[2].toInt() and 0xFF) shl 8) or
+                                (bytes[3].toInt() and 0xFF)
+                    }
+                }
+            }
+            val actionInt = when (rule.action) {
+                Action.BLOCK -> 0
+                Action.IGNORE -> 1
+                Action.FLAG -> 2
+            }
+            com.mobisec.omniip.core.NativeEngine.updateNativeRule(key, ipInt, portInt, actionInt)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
 }

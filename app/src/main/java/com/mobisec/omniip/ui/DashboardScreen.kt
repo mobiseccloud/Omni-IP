@@ -176,6 +176,19 @@ fun DashboardScreen(
                     val sizeMb = pcapSize / (1024.0 * 1024.0)
                     Text("PCAP SIZE: ${String.format("%.2f MB", sizeMb)}", color = MatrixGreen, fontSize = 14.sp)
                     Text("RX: $rxBytes Bytes | TX: $txBytes Bytes", color = TacticalAmber, fontSize = 14.sp)
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            val pcapFile = java.io.File(context.filesDir, "capture.pcap")
+                            if (pcapFile.exists()) {
+                                com.mobisec.omniip.core.ExportEngine.shareFile(context, pcapFile, "application/vnd.tcpdump.pcap")
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = MatrixGreen)
+                    ) {
+                        Text("EXPORT DATA")
+                    }
                 }
             }
         }
