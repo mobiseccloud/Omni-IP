@@ -22,5 +22,6 @@ fun ToolkitNavHost(onRequirePremium: () -> Unit = {}) {
         composable("ipconv") { IpConverterScreen() }
         composable("wifi") { WifiScannerScreen(onRequirePremium) }
         composable("netstats") { NetworkStatsScreen() }
+        composable("dnsthreats") { DnsThreatFeedsScreen() }
     }
 }

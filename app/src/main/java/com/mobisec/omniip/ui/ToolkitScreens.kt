@@ -42,6 +42,152 @@ import androidx.compose.ui.viewinterop.AndroidView
 
 
 @Composable
+fun DnsThreatFeedsScreen() {
+    var customDomain by remember { mutableStateOf("") }
+    var domainsList by remember { mutableStateOf(listOf<String>()) }
+    val scope = rememberCoroutineScope()
+
+    Column(modifier = Modifier.fillMaxSize().background(PureBlack).padding(16.dp)) {
+        Text("DNS THREAT FEEDS (SINKHOLE)", color = MatrixGreen, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+        Spacer(modifier = Modifier.height(16.dp))
+
+        OutlinedTextField(
+            value = customDomain,
+            onValueChange = { customDomain = it },
+            label = { Text("Import Domain (e.g. ad.doubleclick.net)", color = MatrixGreen) },
+            colors = OutlinedTextFieldDefaults.colors(focusedTextColor = MatrixGreen, unfocusedTextColor = MatrixGreen, focusedBorderColor = MatrixGreen, unfocusedBorderColor = MatrixGreen),
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Button(
+            onClick = {
+                if (customDomain.isNotBlank()) {
+                    val newDomains = domainsList.toMutableList()
+                    newDomains.add(customDomain)
+                    domainsList = newDomains
+                    customDomain = ""
+
+                    scope.launch(Dispatchers.IO) {
+                        val c1 = 0x87c37b91114253d5UL
+                        val c2 = 0x4cf5ad432745937fUL
+                        val hashes = LongArray(newDomains.size)
+
+                        for (i in newDomains.indices) {
+                            val domain = newDomains[i].lowercase()
+                            var h1: ULong = 0u
+                            var h2: ULong = 0u
+                            val data = domain.toByteArray()
+                            val len = data.size
+                            val nblocks = len / 16
+
+                            for (j in 0 until nblocks) {
+                                var k1 = (data[j * 16 + 0].toULong() and 0xFFu) or ((data[j * 16 + 1].toULong() and 0xFFu) shl 8) or ((data[j * 16 + 2].toULong() and 0xFFu) shl 16) or ((data[j * 16 + 3].toULong() and 0xFFu) shl 24) or ((data[j * 16 + 4].toULong() and 0xFFu) shl 32) or ((data[j * 16 + 5].toULong() and 0xFFu) shl 40) or ((data[j * 16 + 6].toULong() and 0xFFu) shl 48) or ((data[j * 16 + 7].toULong() and 0xFFu) shl 56)
+                                var k2 = (data[j * 16 + 8].toULong() and 0xFFu) or ((data[j * 16 + 9].toULong() and 0xFFu) shl 8) or ((data[j * 16 + 10].toULong() and 0xFFu) shl 16) or ((data[j * 16 + 11].toULong() and 0xFFu) shl 24) or ((data[j * 16 + 12].toULong() and 0xFFu) shl 32) or ((data[j * 16 + 13].toULong() and 0xFFu) shl 40) or ((data[j * 16 + 14].toULong() and 0xFFu) shl 48) or ((data[j * 16 + 15].toULong() and 0xFFu) shl 56)
+
+                                k1 *= c1
+                                k1 = (k1 shl 31) or (k1 shr (64 - 31))
+                                k1 *= c2
+                                h1 = h1 xor k1
+
+                                h1 = (h1 shl 27) or (h1 shr (64 - 27))
+                                h1 += h2
+                                h1 = h1 * 5u + 0x52dce729u
+
+                                k2 *= c2
+                                k2 = (k2 shl 33) or (k2 shr (64 - 33))
+                                k2 *= c1
+                                h2 = h2 xor k2
+
+                                h2 = (h2 shl 31) or (h2 shr (64 - 31))
+                                h2 += h1
+                                h2 = h2 * 5u + 0x38495ab5u
+                            }
+
+                            var k1: ULong = 0u
+                            var k2: ULong = 0u
+                            val tailOffset = nblocks * 16
+
+                            when (len and 15) {
+                                15 -> k2 = k2 xor ((data[tailOffset + 14].toULong() and 0xFFu) shl 48)
+                            }
+                            if ((len and 15) >= 14) k2 = k2 xor ((data[tailOffset + 13].toULong() and 0xFFu) shl 40)
+                            if ((len and 15) >= 13) k2 = k2 xor ((data[tailOffset + 12].toULong() and 0xFFu) shl 32)
+                            if ((len and 15) >= 12) k2 = k2 xor ((data[tailOffset + 11].toULong() and 0xFFu) shl 24)
+                            if ((len and 15) >= 11) k2 = k2 xor ((data[tailOffset + 10].toULong() and 0xFFu) shl 16)
+                            if ((len and 15) >= 10) k2 = k2 xor ((data[tailOffset + 9].toULong() and 0xFFu) shl 8)
+                            if ((len and 15) >= 9) {
+                                k2 = k2 xor (data[tailOffset + 8].toULong() and 0xFFu)
+                                k2 *= c2
+                                k2 = (k2 shl 33) or (k2 shr (64 - 33))
+                                k2 *= c1
+                                h2 = h2 xor k2
+                            }
+
+                            if ((len and 15) >= 8) k1 = k1 xor ((data[tailOffset + 7].toULong() and 0xFFu) shl 56)
+                            if ((len and 15) >= 7) k1 = k1 xor ((data[tailOffset + 6].toULong() and 0xFFu) shl 48)
+                            if ((len and 15) >= 6) k1 = k1 xor ((data[tailOffset + 5].toULong() and 0xFFu) shl 40)
+                            if ((len and 15) >= 5) k1 = k1 xor ((data[tailOffset + 4].toULong() and 0xFFu) shl 32)
+                            if ((len and 15) >= 4) k1 = k1 xor ((data[tailOffset + 3].toULong() and 0xFFu) shl 24)
+                            if ((len and 15) >= 3) k1 = k1 xor ((data[tailOffset + 2].toULong() and 0xFFu) shl 16)
+                            if ((len and 15) >= 2) k1 = k1 xor ((data[tailOffset + 1].toULong() and 0xFFu) shl 8)
+                            if ((len and 15) >= 1) {
+                                k1 = k1 xor (data[tailOffset + 0].toULong() and 0xFFu)
+                                k1 *= c1
+                                k1 = (k1 shl 31) or (k1 shr (64 - 31))
+                                k1 *= c2
+                                h1 = h1 xor k1
+                            }
+
+                            h1 = h1 xor len.toULong()
+                            h2 = h2 xor len.toULong()
+                            h1 += h2
+                            h2 += h1
+
+                            h1 = h1 xor (h1 shr 33)
+                            h1 *= 0xff51afd7ed558ccdUL
+                            h1 = h1 xor (h1 shr 33)
+                            h1 *= 0xc4ceb9fe1a85ec53UL
+                            h1 = h1 xor (h1 shr 33)
+
+                            h2 = h2 xor (h2 shr 33)
+                            h2 *= 0xff51afd7ed558ccdUL
+                            h2 = h2 xor (h2 shr 33)
+                            h2 *= 0xc4ceb9fe1a85ec53UL
+                            h2 = h2 xor (h2 shr 33)
+
+                            h1 += h2
+                            h2 += h1
+
+                            hashes[i] = h1.toLong()
+                        }
+
+                        NativeEngine.syncDnsBlocklist(hashes)
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(containerColor = MatrixGreen)
+        ) {
+            Text("SYNC TO NATIVE C++ ENCLAVE")
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        LazyColumn(modifier = Modifier.fillMaxSize()) {
+            items(domainsList) { domain ->
+                Card(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Text(domain, modifier = Modifier.padding(12.dp), color = MatrixGreen)
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun GenericStubScreen(title: String) {
     Column(modifier = Modifier.fillMaxSize().background(PureBlack).padding(16.dp)) {
         Text(title, color = MatrixGreen, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
@@ -385,7 +531,8 @@ fun ConnectionLogScreen(viewModel: ConnectionLogViewModel = viewModel()) {
                             }
                         }
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text("${log.destIp}:${log.destPort}", color = textColor, fontSize = 14.sp)
+                        val prefix = if (log.action == "BLOCK") "[BLOCKED] " else if (log.action == "FLAG") "[FLAGGED] " else ""
+                        Text("$prefix${log.appName} -> ${log.destIp}:${log.destPort}", color = textColor, fontSize = 14.sp)
                         if (log.countryCode != null || log.city != null || log.asn != null) {
                             val geoStr = listOfNotNull(log.countryCode, log.city, log.asn).joinToString(" - ")
                             Text(geoStr, color = MatrixGreen.copy(alpha = 0.6f), fontSize = 12.sp)

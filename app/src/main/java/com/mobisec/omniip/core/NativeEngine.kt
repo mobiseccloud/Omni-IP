@@ -17,4 +17,5 @@ object NativeEngine {
     external fun updateNativeRule(key: String, ip: Int, port: Int, action: Int)
     external fun clearNativeRules()
     external fun syncThreatBloomFilter(bitArray: LongArray, hashCount: Int)
+    external fun syncDnsBlocklist(domainHashes: LongArray)
 }
