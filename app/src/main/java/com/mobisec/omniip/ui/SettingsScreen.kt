@@ -1,4 +1,5 @@
 package com.mobisec.omniip.ui
+import kotlinx.coroutines.launch
 
 import android.content.Context
 import android.content.Intent
@@ -40,9 +41,143 @@ fun SettingsScreen() {
     var alienVaultKey by remember { mutableStateOf(sharedPrefs.getString("alienvault_key", "") ?: "") }
     var abuseIpDbKey by remember { mutableStateOf(sharedPrefs.getString("abuseipdb_key", "") ?: "") }
 
+    val securityPrefs = remember { com.mobisec.omniip.core.SecurityPreferences(context) }
+    val coroutineScope = rememberCoroutineScope()
+    var pinLockEnabled by remember { mutableStateOf(securityPrefs.isPinLockEnabled()) }
+    var showSetPinDialog by remember { mutableStateOf(false) }
+    var showRemovePinDialog by remember { mutableStateOf(false) }
+    var pinError by remember { mutableStateOf(false) }
+
     val scrollState = rememberScrollState()
 
+    if (showSetPinDialog) {
+        var pinInput by remember { mutableStateOf("") }
+        var confirmPinInput by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showSetPinDialog = false },
+            title = { Text("Set Protection PIN", color = MatrixGreen) },
+            text = {
+                Column {
+                    Text("Enter a 4-to-6 digit PIN to protect the firewall.", color = MaterialTheme.colorScheme.onSurface)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = pinInput,
+                        onValueChange = { if (it.length <= 6) pinInput = it },
+                        label = { Text("PIN") },
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = confirmPinInput,
+                        onValueChange = { if (it.length <= 6) confirmPinInput = it },
+                        label = { Text("Confirm PIN") },
+                        isError = pinError,
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword)
+                    )
+                    if (pinError) {
+                        Text("PINs must match and be 4-6 digits.", color = AlertRed, fontSize = 12.sp)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (pinInput == confirmPinInput && pinInput.length in 4..6) {
+                        coroutineScope.launch {
+                            securityPrefs.setPin(pinInput)
+                            pinLockEnabled = true
+                            showSetPinDialog = false
+                            pinError = false
+                        }
+                    } else {
+                        pinError = true
+                    }
+                }) {
+                    Text("SAVE")
+                }
+            },
+            dismissButton = {
+                Button(onClick = {
+                    showSetPinDialog = false
+                    pinError = false
+                }) {
+                    Text("CANCEL")
+                }
+            }
+        )
+    }
+
+    if (showRemovePinDialog) {
+        var pinInput by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showRemovePinDialog = false },
+            title = { Text("Remove Protection PIN", color = MatrixGreen) },
+            text = {
+                Column {
+                    Text("Enter your current PIN to disable protection.", color = MaterialTheme.colorScheme.onSurface)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = pinInput,
+                        onValueChange = { pinInput = it },
+                        label = { Text("Current PIN") },
+                        isError = pinError,
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword)
+                    )
+                    if (pinError) {
+                        Text("Incorrect PIN.", color = AlertRed, fontSize = 12.sp)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    coroutineScope.launch {
+                        if (securityPrefs.verifyPin(pinInput)) {
+                            securityPrefs.removePin()
+                            pinLockEnabled = false
+                            showRemovePinDialog = false
+                            pinError = false
+                        } else {
+                            pinError = true
+                        }
+                    }
+                }) {
+                    Text("REMOVE")
+                }
+            },
+            dismissButton = {
+                Button(onClick = {
+                    showRemovePinDialog = false
+                    pinError = false
+                }) {
+                    Text("CANCEL")
+                }
+            }
+        )
+    }
+
     Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(scrollState)) {
+        Text("Firewall Teardown Protection", fontSize = 20.sp, color = MatrixGreen)
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Require PIN to Disable Firewall", modifier = Modifier.weight(1f), fontSize = 16.sp)
+                Switch(
+                    checked = pinLockEnabled,
+                    onCheckedChange = {
+                        if (it) {
+                            showSetPinDialog = true
+                        } else {
+                            showRemovePinDialog = true
+                        }
+                    }
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+        HorizontalDivider(color = TacticalAmber)
+        Spacer(modifier = Modifier.height(24.dp))
+
         Text("Automated Threat Feeds", fontSize = 20.sp, color = MatrixGreen)
         Spacer(modifier = Modifier.height(16.dp))
 
