@@ -1,58 +1,24 @@
-# Omni-IP
+# Omni-IP: Tactical Endpoint Security
 
-## Omni-IP: The Pocket SOC
+## Executive Summary
+Omni-IP is a zero-allocation, native-layer Android Endpoint Detection and Response (EDR) tactical firewall designed by Mobisec Cloud. Operating entirely on-device via a local loopback VPN interface, Omni-IP delivers deep packet forensics, runtime self-protection, and contextual threat mitigation without relying on external cloud processing.
 
-### The Hook
-Omni-IP is an enterprise-grade, rootless network forensics and probing suite designed for modern Android environments. Engineered as a non-rooted "Pocket SOC" (Security Operations Centre), Omni-IP delivers a comprehensive arsenal for network administrators, penetration testers, and security researchers. It provides absolute visibility and control over device network activity, combining a local VpnService sinkhole firewall with a massive tactical active-probing toolkit driven by a high-performance JNI/C++ native engine.
+## Core Capabilities
+*   **Contextual Network Policies:** Dynamically swaps firewall rules based on active network topology (Wi-Fi vs. Cellular) using zero-allocation C++ rule caches.
+*   **Live DNS Sinkholing:** High-speed interception and resolution blocking of malicious domains using MurmurHash3 and local Bloom Filters.
+*   **App-Level (UID) Attribution:** Correlates network traffic to specific applications in real-time, enforcing per-app bandwidth constraints and behavioral heuristics.
+*   **JSON Rule Portability:** Seamlessly export and import firewall rules and threat feeds via JSON, enabling rapid policy deployment.
+*   **PCAP & CSV Data Exportation:** Captures and securely exports granular packet captures (PCAP) and connection logs (CSV) for external analysis via the Android Storage Access Framework.
 
-### Architecture Overview
-Omni-IP employs a modern, highly decoupled architecture designed for absolute privacy and zero-latency performance:
-*   **Reactive UI:** Built entirely with Jetpack Compose using our signature 'Mobisec Tactical Dark Theme'—featuring pure blacks, deep charcoals, and Matrix Green elements for an immersive, distraction-free terminal aesthetic.
-*   **State Management:** Driven by robust Kotlin Flows and composable architecture to ensure flawless synchronisation during orientation changes and background execution.
-*   **Zero-Embedded-Asset Protocol:** To minimise APK footprint, critical offline datasets (such as `oui.txt` and MaxMind GeoIP) are downloaded dynamically to local storage (`filesDir`) with robust fallback loops, file size validation, and graceful degradation.
-*   **High-Performance Interception:** The core OmniVpnService utilises a zero-allocation packet processing loop and Room database threat feeds, completely avoiding garbage collection stutters.
-*   **Native Execution Engine:** Deep native integration via an NDK/C++ bridge, allowing raw socket control and direct execution of embedded binaries without requiring root access.
+## The Anti-Modding & RASP Enclave
+Omni-IP is heavily armored against reverse engineering and runtime modification. Core security mechanisms include:
+*   **C++ Atomic Baseline Integrity Checks:** Prevents Time-of-Check to Time-of-Use (TOCTOU) exploits and race conditions.
+*   **Compile-Time XOR String Obfuscation:** Ensures sensitive constants and strings are never exposed in plaintext within the compiled binary (`.rodata`).
+*   **Dynamic Keystore Hashing:** Performs active verification of the installer and APK signatures directly within the native layer using OS-agnostic cryptographic routines.
+*   **Cryptographic PIN-Locked Teardown Gate:** Prevents unauthorized suspension or termination of the firewall service.
 
-### The Comprehensive Feature Map
-
-#### Forensics & Telemetry
-*   **Targeted & Global Raw PCAP Export:** Capture and export standard PCAP files locally for deep packet inspection.
-*   **Live Connection Telemetry:** Real-time visibility into active sockets and network bindings.
-*   **UID-based Data Exfiltration Tracking (Rx/Tx):** Granular tracking of bytes sent and received per application via high-performance `ConcurrentHashMap` structures.
-*   **Historic Connection Logs:** Persistent, offline logging of all historical network connections.
-
-#### Active Defence (Firewall)
-*   **Local VPN Sinkhole:** A rootless, on-device firewall utilising the Android `VpnService` for deep packet inspection and selective routing.
-*   **TLS SNI Extraction & Blocking:** Intercept and block traffic based on Server Name Indication (SNI) without breaking encryption.
-*   **DNS-over-HTTPS (DoH) Proxy:** Secure, encrypted DNS resolution bypassing ISP interception.
-*   **Behavioural Heuristics:** A token-bucket rate limiting engine that tracks anomalous network traffic (e.g., excessive TCP SYN connections or DNS queries) to automatically flag rogue applications.
-
-#### Tactical Toolkit (Recon & Probing)
-*   **Native C++ Ping & Traceroute:** High-fidelity ICMP tooling directly interacting with native sockets.
-*   **JNI Nmap Port Scanner:** Execute both Fast Scans and Premium Deep Scans via our custom NDK integration.
-*   **LAN Subnet Sweeper:** Rapid discovery of local network nodes featuring MAC OUI Hardware Vendor Resolution.
-*   **WiFi Analyser:** Detailed metrics on local wireless environments.
-*   **Offline IP Calculator & Converter:** Essential subnetting utilities without requiring internet connectivity.
-*   **DNS Record Lookup:** Advanced DNS interrogation powered by the robust `dnsjava` library.
-*   **Whois Lookup & Router Gateway Setup:** Instantly identify domain ownership and configure local routing parameters.
-
-#### Threat Intelligence
-*   **Offline MaxMind GeoIP/ASN Resolution:** Zero-latency geographical and autonomous system identification.
-*   **Threat Feed Synchronisation:** Background integration with AlienVault OTX and AbuseIPDB using user-supplied API keys.
-*   **Tactical App Ejection Intent:** Swift native uninstallation of applications flagged for generating network offences, seamlessly integrated via `Settings.ACTION_APPLICATION_DETAILS_SETTINGS`.
-
-### Build Instructions
-To build Omni-IP from source, ensure you have Android Studio installed with the latest NDK and CMake tools.
-
-**Native Compilation (`omniip_bridge`):**
-1.  The project utilises CMake for compiling the C++ native engines.
-2.  Do not use `add_subdirectory()` for the C++ engines to avoid CMake collisions; compile raw source files directly.
-3.  Isolate C++ standards via CMake target properties (e.g., C++14 for `libsocket`, C++17 for `icmpenguin` and the bridge).
-4.  Configure the `build.gradle.kts` to explicitly filter NDK ABIs: `arm64-v8a`, `armeabi-v7a`, and `x86_64`.
-
-**Code Obfuscation:**
-*   Ensure R8/Proguard rules are correctly configured to preserve JNI method signatures, Room Database DAOs, and our internal data classes.
-
-**Packaging:**
-*   Always assemble the APK via `./gradlew assembleRelease` to ensure the Zero-Embedded-Asset routines and offline databases correctly initialise upon first launch.
-
+## Technology Stack
+*   **Android NDK (C++):** Powers the core zero-allocation packet processing and deep packet inspection engine.
+*   **Jetpack Compose:** Drives the tactical "Pocket SOC" dark theme UI.
+*   **Kotlin Coroutines:** Manages asynchronous data flows, database interactions, and UI state.
+*   **VpnService Loopback Interface:** Facilitates the local interception and routing of all device network traffic without external servers.
