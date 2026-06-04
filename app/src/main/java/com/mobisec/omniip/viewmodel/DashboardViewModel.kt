@@ -26,6 +26,13 @@ class DashboardViewModel(application: Application, private val savedStateHandle:
     private val _showUpgradePrompt = MutableStateFlow(false)
     val showUpgradePrompt: StateFlow<Boolean> = _showUpgradePrompt
 
+    private val _isFirewallActive = MutableStateFlow(false)
+    val isFirewallActive: StateFlow<Boolean> = _isFirewallActive
+
+    fun setFirewallActive(isActive: Boolean) {
+        _isFirewallActive.value = isActive
+    }
+
     fun triggerUpgradePrompt() {
         _showUpgradePrompt.value = true
     }
