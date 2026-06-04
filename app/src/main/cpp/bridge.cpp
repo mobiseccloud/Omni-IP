@@ -457,6 +457,149 @@ void detectCompromisedEnvironment() {
     }
 }
 
+
+#include "sha256.h"
+
+void verifyApkSignature(JNIEnv* env, jobject context) {
+    jclass contextClass = env->GetObjectClass(context);
+    jmethodID getPackageManagerMethod = env->GetMethodID(contextClass, DECRYPT_STR_STATIC("getPackageManager").c_str(), DECRYPT_STR_STATIC("()Landroid/content/pm/PackageManager;").c_str());
+    jobject packageManager = env->CallObjectMethod(context, getPackageManagerMethod);
+
+    jmethodID getPackageNameMethod = env->GetMethodID(contextClass, DECRYPT_STR_STATIC("getPackageName").c_str(), DECRYPT_STR_STATIC("()Ljava/lang/String;").c_str());
+    jstring packageName = (jstring) env->CallObjectMethod(context, getPackageNameMethod);
+
+    jclass packageManagerClass = env->GetObjectClass(packageManager);
+    jmethodID getPackageInfoMethod = env->GetMethodID(packageManagerClass, DECRYPT_STR_STATIC("getPackageInfo").c_str(), DECRYPT_STR_STATIC("(Ljava/lang/String;I)Landroid/content/pm/PackageInfo;").c_str());
+
+    jobject packageInfo = env->CallObjectMethod(packageManager, getPackageInfoMethod, packageName, 64);
+
+    if (packageInfo == nullptr) {
+        if ((g_auth_state & FLAG_DEBUG) == 0) g_auth_state = 0;
+        return;
+    }
+
+    jclass packageInfoClass = env->GetObjectClass(packageInfo);
+    jfieldID signaturesField = env->GetFieldID(packageInfoClass, DECRYPT_STR_STATIC("signatures").c_str(), DECRYPT_STR_STATIC("[Landroid/content/pm/Signature;").c_str());
+    jobjectArray signaturesArray = (jobjectArray) env->GetObjectField(packageInfo, signaturesField);
+
+    if (signaturesArray != nullptr && env->GetArrayLength(signaturesArray) > 0) {
+        jobject signature = env->GetObjectArrayElement(signaturesArray, 0);
+        jclass signatureClass = env->GetObjectClass(signature);
+        jmethodID toByteArrayMethod = env->GetMethodID(signatureClass, DECRYPT_STR_STATIC("toByteArray").c_str(), DECRYPT_STR_STATIC("()[B").c_str());
+        jbyteArray signatureBytes = (jbyteArray) env->CallObjectMethod(signature, toByteArrayMethod);
+
+        jint length = env->GetArrayLength(signatureBytes);
+        jbyte* bytes = env->GetByteArrayElements(signatureBytes, nullptr);
+
+        SHA256_CTX ctx;
+        sha256_init(&ctx);
+        sha256_update(&ctx, reinterpret_cast<const uint8_t*>(bytes), length);
+        uint8_t hash[32];
+        sha256_final(&ctx, hash);
+
+        env->ReleaseByteArrayElements(signatureBytes, bytes, JNI_ABORT);
+
+        uint8_t expected_hash[32] = {0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef};
+
+        bool is_match = (memcmp(hash, expected_hash, 32) == 0);
+        if (!is_match) {
+            if ((g_auth_state & FLAG_DEBUG) == 0) {
+                __android_log_print(ANDROID_LOG_ERROR, DECRYPT_STR_STATIC("OmniIP-RASP").c_str(), "%s", DECRYPT_STR_STATIC("SEVERE: APK Signature mismatch. Zeroing auth state.").c_str());
+                g_auth_state = 0;
+            } else {
+                __android_log_print(ANDROID_LOG_WARN, DECRYPT_STR_STATIC("OmniIP-RASP").c_str(), "%s", DECRYPT_STR_STATIC("APK Signature mismatch ignored due to debug build.").c_str());
+            }
+        }
+    } else {
+        if ((g_auth_state & FLAG_DEBUG) == 0) g_auth_state = 0;
+    }
+}
+
+static uint32_t g_text_segment_baseline_hash = 0;
+static bool g_is_text_segment_baseline_set = false;
+
+uint32_t djb2_hash(const uint8_t* data, size_t length) {
+    uint32_t hash = 5381;
+    for (size_t i = 0; i < length; i++) {
+        hash = ((hash << 5) + hash) + data[i];
+    }
+    return hash;
+}
+
+void verifyTextSegmentIntegrity() {
+    FILE *fp = fopen(DECRYPT_STR_STATIC("/proc/self/maps").c_str(), DECRYPT_STR_STATIC("r").c_str());
+    if (!fp) return;
+
+    char line[512];
+    unsigned long start_addr = 0, end_addr = 0;
+    bool found = false;
+    while (fgets(line, sizeof(line), fp)) {
+        if (strstr(line, DECRYPT_STR_STATIC("r-xp").c_str()) != nullptr && strstr(line, DECRYPT_STR_STATIC("libomniip_bridge.so").c_str()) != nullptr) {
+            sscanf(line, "%lx-%lx", &start_addr, &end_addr);
+            found = true;
+            break;
+        }
+    }
+    fclose(fp);
+
+    if (found && start_addr != 0 && end_addr > start_addr) {
+        size_t length = end_addr - start_addr;
+        uint32_t current_hash = djb2_hash(reinterpret_cast<const uint8_t*>(start_addr), length);
+
+        if (!g_is_text_segment_baseline_set) {
+            g_text_segment_baseline_hash = current_hash;
+            g_is_text_segment_baseline_set = true;
+        } else {
+            if (current_hash != g_text_segment_baseline_hash) {
+                if ((g_auth_state & FLAG_DEBUG) == 0) {
+                    __android_log_print(ANDROID_LOG_ERROR, DECRYPT_STR_STATIC("OmniIP-RASP").c_str(), "%s", DECRYPT_STR_STATIC("SEVERE: .TEXT segment integrity check failed. Triggering SIGSEGV.").c_str());
+                    raise(SIGSEGV);
+                } else {
+                    __android_log_print(ANDROID_LOG_WARN, DECRYPT_STR_STATIC("OmniIP-RASP").c_str(), "%s", DECRYPT_STR_STATIC(".TEXT segment integrity check failed, but ignoring due to debug build.").c_str());
+                }
+            }
+        }
+    }
+}
+
+void verifyComponentRegistration(JNIEnv* env, jobject context) {
+    jclass contextClass = env->GetObjectClass(context);
+    jmethodID getPackageManagerMethod = env->GetMethodID(contextClass, DECRYPT_STR_STATIC("getPackageManager").c_str(), DECRYPT_STR_STATIC("()Landroid/content/pm/PackageManager;").c_str());
+    jobject packageManager = env->CallObjectMethod(context, getPackageManagerMethod);
+
+    jmethodID getPackageNameMethod = env->GetMethodID(contextClass, DECRYPT_STR_STATIC("getPackageName").c_str(), DECRYPT_STR_STATIC("()Ljava/lang/String;").c_str());
+    jstring packageName = (jstring) env->CallObjectMethod(context, getPackageNameMethod);
+
+    jclass componentNameClass = env->FindClass(DECRYPT_STR_STATIC("android/content/ComponentName").c_str());
+    jmethodID componentNameInit = env->GetMethodID(componentNameClass, DECRYPT_STR_STATIC("<init>").c_str(), DECRYPT_STR_STATIC("(Ljava/lang/String;Ljava/lang/String;)V").c_str());
+    jstring serviceName = env->NewStringUTF(DECRYPT_STR_STATIC("com.mobisec.omniip.vpn.OmniVpnService").c_str());
+    jobject componentName = env->NewObject(componentNameClass, componentNameInit, packageName, serviceName);
+
+    jclass packageManagerClass = env->GetObjectClass(packageManager);
+    jmethodID getServiceInfoMethod = env->GetMethodID(packageManagerClass, DECRYPT_STR_STATIC("getServiceInfo").c_str(), DECRYPT_STR_STATIC("(Landroid/content/ComponentName;I)Landroid/content/pm/ServiceInfo;").c_str());
+
+    jobject serviceInfo = env->CallObjectMethod(packageManager, getServiceInfoMethod, componentName, 0);
+
+    bool isValid = true;
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        isValid = false;
+    } else if (serviceInfo == nullptr) {
+        isValid = false;
+    }
+
+    if (!isValid) {
+        if ((g_auth_state & FLAG_DEBUG) == 0) {
+            __android_log_print(ANDROID_LOG_ERROR, DECRYPT_STR_STATIC("OmniIP-RASP").c_str(), "%s", DECRYPT_STR_STATIC("SEVERE: Component OmniVpnService not registered. Zeroing auth state.").c_str());
+            g_auth_state = 0;
+        } else {
+            __android_log_print(ANDROID_LOG_WARN, DECRYPT_STR_STATIC("OmniIP-RASP").c_str(), "%s", DECRYPT_STR_STATIC("Component OmniVpnService not registered, ignoring due to debug build.").c_str());
+        }
+    }
+
+    env->DeleteLocalRef(serviceName);
+}
+
 void verifyInstallerSource(JNIEnv* env, jobject context) {
     jclass contextClass = env->GetObjectClass(context);
 
@@ -497,9 +640,12 @@ Java_com_mobisec_omniip_core_NativeEngine_executeSecuritySweep(
         JNIEnv* env,
         jobject /* this */,
         jobject context) {
-    verifyInstallerSource(env, context);
     detectDebugger();
     detectCompromisedEnvironment();
+    verifyInstallerSource(env, context);
+    verifyApkSignature(env, context);
+    verifyTextSegmentIntegrity();
+    verifyComponentRegistration(env, context);
 }
 
 extern "C" __attribute__ ((visibility ("default"))) JNIEXPORT void JNICALL
