@@ -155,6 +155,28 @@ fun SettingsScreen() {
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(scrollState)) {
+        var autoStartEnabled by remember { mutableStateOf(securityPrefs.isAutoStartEnabled()) }
+
+        Text("Firewall Boot Persistence", fontSize = 20.sp, color = MatrixGreen)
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Firewall Auto-Start on Boot", modifier = Modifier.weight(1f), fontSize = 16.sp)
+                Switch(
+                    checked = autoStartEnabled,
+                    onCheckedChange = {
+                        autoStartEnabled = it
+                        securityPrefs.setAutoStartEnabled(it)
+                    }
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+        HorizontalDivider(color = TacticalAmber)
+        Spacer(modifier = Modifier.height(24.dp))
+
         Text("Firewall Teardown Protection", fontSize = 20.sp, color = MatrixGreen)
         Spacer(modifier = Modifier.height(16.dp))
 

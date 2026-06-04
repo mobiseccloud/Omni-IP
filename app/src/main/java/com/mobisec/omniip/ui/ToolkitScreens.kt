@@ -345,6 +345,19 @@ fun ConnectionLogScreen(viewModel: ConnectionLogViewModel = viewModel()) {
         }
         Spacer(modifier = Modifier.height(16.dp))
 
+        val context = androidx.compose.ui.platform.LocalContext.current
+        Button(
+            onClick = {
+                val csvFile = viewModel.exportLogsToCsv(context)
+                com.mobisec.omniip.core.ExportEngine.shareFile(context, csvFile, "text/csv")
+            },
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.buttonColors(containerColor = MatrixGreen)
+        ) {
+            Text("EXPORT DATA")
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             items(logs) { log ->
                 val cardColor = when (log.action) {

@@ -32,4 +32,15 @@ class ConnectionLogViewModel(application: Application) : AndroidViewModel(applic
         }
         _selectedActions.value = current
     }
+
+    fun exportLogsToCsv(context: android.content.Context): java.io.File {
+        val file = java.io.File(context.cacheDir, "connection_logs.csv")
+        file.bufferedWriter().use { out ->
+            out.write("Timestamp,App,Destination IP,Port,Action,ASN,Country,City\n")
+            logs.value.forEach { log ->
+                out.write("${log.timestamp},${log.appName},${log.destIp},${log.destPort},${log.action},${log.asn},${log.countryCode},${log.city}\n")
+            }
+        }
+        return file
+    }
 }
