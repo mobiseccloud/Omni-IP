@@ -552,9 +552,9 @@ void verifyTextSegmentIntegrity() {
         size_t length = end_addr - start_addr;
         uint32_t current_hash = djb2_hash(reinterpret_cast<const uint8_t*>(start_addr), length);
 
-        if (!g_is_text_segment_baseline_set) {
+        bool expected = false;
+        if (g_is_text_segment_baseline_set.compare_exchange_strong(expected, true)) {
             g_text_segment_baseline_hash = current_hash;
-            g_is_text_segment_baseline_set = true;
         } else {
             if (current_hash != g_text_segment_baseline_hash) {
                 if ((g_auth_state & FLAG_DEBUG) == 0) {
@@ -735,12 +735,14 @@ Java_com_mobisec_omniip_core_NativeEngine_processPacketNative(
     const uint8_t* rawData = static_cast<const uint8_t*>(bufferPtr);
     const IPv4Header* ipHeader = reinterpret_cast<const IPv4Header*>(rawData);
 
-    uint8_t version = ipHeader->version_ihl >> 4;
+    uint8_t version_ihl;
+    std::memcpy(&version_ihl, rawData, sizeof(uint8_t));
+    uint8_t version = version_ihl >> 4;
     if (version != 4) {
         return 1; // ALLOW non-IPv4 for now to let Kotlin side handle or ignore
     }
 
-    uint8_t ihl = ipHeader->version_ihl & 0x0F;
+    uint8_t ihl = version_ihl & 0x0F;
     uint8_t header_len = ihl * 4;
 
     if (length < header_len) {
