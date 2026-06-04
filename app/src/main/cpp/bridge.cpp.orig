@@ -34,7 +34,7 @@ struct FirewallRule {
     int action_code; // 0 = DROP, 1 = ALLOW, 2 = FLAG
 };
 
-static std::unordered_map<uint64_t, FirewallRule> g_native_rule_cache;
+static std::unordered_map<std::string, FirewallRule> g_native_rule_cache;
 static std::shared_mutex g_rule_mutex;
 
 // Basic bloom filter structure for fast native checking
@@ -520,10 +520,8 @@ void verifyApkSignature(JNIEnv* env, jobject context) {
     }
 }
 
-#include <atomic>
-
-static std::atomic<uint64_t> g_text_segment_baseline_hash(0);
-static std::atomic<bool> g_is_text_segment_baseline_set(false);
+static uint32_t g_text_segment_baseline_hash = 0;
+static bool g_is_text_segment_baseline_set = false;
 
 uint32_t djb2_hash(const uint8_t* data, size_t length) {
     uint32_t hash = 5381;
@@ -553,16 +551,11 @@ void verifyTextSegmentIntegrity() {
         size_t length = end_addr - start_addr;
         uint32_t current_hash = djb2_hash(reinterpret_cast<const uint8_t*>(start_addr), length);
 
-        uint64_t expected_hash = 0;
-        if (g_text_segment_baseline_hash.compare_exchange_strong(expected_hash, current_hash)) {
-            // First thread sets the hash successfully
-            g_is_text_segment_baseline_set.store(true);
+        if (!g_is_text_segment_baseline_set) {
+            g_text_segment_baseline_hash = current_hash;
+            g_is_text_segment_baseline_set = true;
         } else {
-            // Wait until hash is fully set (in case it was briefly 0 during initialization)
-            // But since compare_exchange on hash handles the sync, expected_hash now contains the actual hash
-            // (or we can just load it again to be sure).
-            // Actually, if compare_exchange fails, expected_hash is updated with the current value.
-            if (current_hash != expected_hash) {
+            if (current_hash != g_text_segment_baseline_hash) {
                 if ((g_auth_state & FLAG_DEBUG) == 0) {
                     __android_log_print(ANDROID_LOG_ERROR, DECRYPT_STR_STATIC("OmniIP-RASP").c_str(), "%s", DECRYPT_STR_STATIC("SEVERE: .TEXT segment integrity check failed. Triggering SIGSEGV.").c_str());
                     raise(SIGSEGV);
@@ -681,7 +674,7 @@ Java_com_mobisec_omniip_core_NativeEngine_updateNativeRule(
         jint port,
         jint action) {
     std::unique_lock<std::shared_mutex> lock(g_rule_mutex);
-    uint64_t rule_key = ((uint64_t)static_cast<uint32_t>(ip) << 16) | port;
+    uint64_t rule_key = ((uint64_t)ip << 16) | port;
     g_native_rule_cache[rule_key] = {static_cast<uint32_t>(ip), static_cast<uint16_t>(port), action};
 }
 
