@@ -24,11 +24,12 @@ import androidx.activity.result.contract.ActivityResultContracts
 import android.content.Intent
 import android.net.VpnService
 import com.mobisec.omniip.vpn.OmniVpnService
-
+import com.mobisec.omniip.viewmodel.DashboardViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardScreen(
+    viewModel: DashboardViewModel,
     targetIp: String,
     initialAction: String,
     terminalOutput: String,
@@ -47,6 +48,43 @@ fun DashboardScreen(
     var ipInput by remember { mutableStateOf(targetIp) }
     var actionInput by remember { mutableStateOf(initialAction) }
     var showAppSelectionSheet by remember { mutableStateOf(false) }
+
+    val showPinAuthDialog by viewModel.showPinAuthDialog.collectAsState()
+    val pinAuthError by viewModel.pinAuthError.collectAsState()
+
+    if (showPinAuthDialog) {
+        var pinInput by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { viewModel.dismissPinAuthDialog() },
+            title = { Text("Firewall Teardown Protection", color = MatrixGreen) },
+            text = {
+                Column {
+                    Text("Enter PIN to disable firewall.", color = MaterialTheme.colorScheme.onSurface)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = pinInput,
+                        onValueChange = { pinInput = it },
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.NumberPassword),
+                        isError = pinAuthError,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = if (pinAuthError) AlertRed else MatrixGreen,
+                            unfocusedBorderColor = if (pinAuthError) AlertRed else Color.Gray
+                        )
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = { viewModel.submitTeardownPin(pinInput) }) {
+                    Text("AUTHORIZE")
+                }
+            },
+            dismissButton = {
+                Button(onClick = { viewModel.dismissPinAuthDialog() }) {
+                    Text("CANCEL")
+                }
+            }
+        )
+    }
 
     val context = LocalContext.current
     val vpnLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -113,11 +151,7 @@ fun DashboardScreen(
                                 onToggleFirewall(true)
                             }
                         } else {
-                            val stopIntent = Intent(context, OmniVpnService::class.java).apply {
-                                action = OmniVpnService.ACTION_STOP_VPN
-                            }
-                            context.startService(stopIntent)
-                            onToggleFirewall(false)
+                            viewModel.requestStopFirewall()
                         }
                     },
                     colors = SwitchDefaults.colors(

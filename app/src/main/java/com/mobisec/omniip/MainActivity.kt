@@ -239,6 +239,7 @@ class MainActivity : ComponentActivity() {
 
                             val isFirewallActive by dashboardViewModel.isFirewallActive.collectAsState()
                             DashboardScreen(
+                                viewModel = dashboardViewModel,
                                 targetIp = targetIp,
                                 initialAction = initialAction,
                                 terminalOutput = terminalOutput,
