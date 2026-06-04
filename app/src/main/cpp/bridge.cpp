@@ -1,3 +1,4 @@
+#include "security_config.h"
 #include <jni.h>
 #include <string>
 
@@ -499,7 +500,10 @@ void verifyApkSignature(JNIEnv* env, jobject context) {
 
         env->ReleaseByteArrayElements(signatureBytes, bytes, JNI_ABORT);
 
-        uint8_t expected_hash[32] = {0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef};
+        uint8_t expected_hash[32];
+        for (int i = 0; i < 32; ++i) {
+            expected_hash[i] = PRODUCTION_SIGNATURE_HASH[i] ^ OBFUSCATION_XOR_KEY;
+        }
 
         bool is_match = (memcmp(hash, expected_hash, 32) == 0);
         if (!is_match) {
