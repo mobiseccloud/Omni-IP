@@ -1,0 +1,15 @@
+[submodule "samples/network-scanners/nmap-ndk"]
+	path = samples/network-scanners/nmap-ndk
+	url = https://github.com/kost/nmap-android
+[submodule "samples/network-scanners/icmpenguin"]
+	path = samples/network-scanners/icmpenguin
+	url = https://github.com/impalex/icmpenguin
+[submodule "samples/firewall-logger/netguard"]
+	path = samples/firewall-logger/netguard
+	url = https://github.com/M66B/NetGuard
+[submodule "samples/wifi-tools/wifi-analyzer"]
+	path = samples/wifi-tools/wifi-analyzer
+	url = https://github.com/VREMSoftwareDevelopment/WiFiAnalyzer
+[submodule "samples/utilities/libsocket"]
+	path = samples/utilities/libsocket
+	url = https://github.com/chensoft/libsocket
