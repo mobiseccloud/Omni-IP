@@ -35,7 +35,7 @@ import com.mobisec.omniip.core.ExportEngine
 import com.mobisec.omniip.core.ImportEngine
 
 @Composable
-fun RulesScreen(viewModel: RulesViewModel) {
+fun RulesScreen(viewModel: RulesViewModel, onRequirePremium: () -> Unit = {}) {
     var selectedTab by remember { mutableStateOf(0) }
     val tabs = listOf("Blocked", "Flagged", "Ignored")
     val rules by viewModel.rules.collectAsState()
