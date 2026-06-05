@@ -85,6 +85,12 @@ class DashboardViewModel(application: Application, private val savedStateHandle:
     }
 
     fun executeAction(ip: String, action: String) {
+        // Phase 8 Implementation: Gate premium actions
+        if (action.contains("DEEP") && !(isPersonalUnlocked.value || isEnterpriseUnlocked.value)) {
+            _showUpgradePrompt.value = true
+            return
+        }
+        // ... proceed with existing _isExecuting logic        
         if (_isExecuting.value) return
 
         _isExecuting.value = true
