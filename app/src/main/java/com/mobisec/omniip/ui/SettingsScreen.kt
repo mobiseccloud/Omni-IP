@@ -18,7 +18,7 @@ import com.mobisec.omniip.db.Action
 import com.mobisec.omniip.ui.theme.AlertRed
 import com.mobisec.omniip.ui.theme.MatrixGreen
 import com.mobisec.omniip.ui.theme.TacticalAmber
-import com.mobisec.omniip.ui.theme.SurfaceDark
+import com.mobisec.omniip.ui.theme.SurfaceLevel1
 import java.io.File
 import android.os.PowerManager
 import android.provider.Settings
@@ -187,7 +187,7 @@ fun SettingsScreen() {
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = TacticalAmber)
                     ) {
-                        Text("Allow Background Execution (Recommended)", color = SurfaceDark)
+                        Text("Allow Background Execution (Recommended)", color = SurfaceLevel1)
                     }
                 }
             }
@@ -325,7 +325,7 @@ fun SettingsScreen() {
                 context.startActivity(intent)
             },
             modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark)
+            colors = ButtonDefaults.buttonColors(containerColor = SurfaceLevel1)
         ) {
             Text("Privacy Policy", color = MatrixGreen)
         }
@@ -340,7 +340,7 @@ fun SettingsScreen() {
                 context.startActivity(intent)
             },
             modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark)
+            colors = ButtonDefaults.buttonColors(containerColor = SurfaceLevel1)
         ) {
             Text("VpnService Disclosure", color = MatrixGreen)
         }
@@ -355,7 +355,7 @@ fun SettingsScreen() {
                 context.startActivity(intent)
             },
             modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = SurfaceDark)
+            colors = ButtonDefaults.buttonColors(containerColor = SurfaceLevel1)
         ) {
             Text("Data Handling Policy", color = MatrixGreen)
         }

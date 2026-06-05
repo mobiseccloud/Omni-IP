@@ -11,11 +11,11 @@ val PurpleGrey40 = Color(0xFF625b71)
 val Pink40 = Color(0xFF7D5260)
 
 // Mobisec Tactical Dark Theme Colors
-val DeepCharcoal = Color(0xFF121212)
+val SurfaceLevel1 = Color(0xFF121212)
+val SurfaceLevel2 = Color(0xFF1E1E1E)
 val PureBlack = Color(0xFF000000)
 val MatrixGreen = Color(0xFF00FF41)
 val TacticalAmber = Color(0xFFFFB000)
 val AlertRed = Color(0xFFFF0000)
 val TextPrimary = Color(0xFFE0E0E0)
 val TextSecondary = Color(0xFFA0A0A0)
-val SurfaceDark = Color(0xFF1E1E1E)

@@ -16,7 +16,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.mobisec.omniip.ui.theme.MatrixGreen
-import com.mobisec.omniip.ui.theme.SurfaceDark
+import com.mobisec.omniip.ui.theme.SurfaceLevel1
 import com.mobisec.omniip.ui.theme.TacticalAmber
 
 @Composable
@@ -33,7 +33,8 @@ fun ToolkitScreen(navController: NavController) {
         "IP Converter" to "ipconv",
         "WiFi Scanner" to "wifi",
         "Network Stats" to "netstats",
-        "DNS Threat Feeds" to "dnsthreats"
+        "DNS Threat Feeds" to "dnsthreats",
+        "Architecture Doc" to "archdoc"
     )
 
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
@@ -48,7 +49,7 @@ fun ToolkitScreen(navController: NavController) {
             items(tools) { (name, route) ->
                 Card(
                     modifier = Modifier.fillMaxWidth().clickable { navController.navigate(route) },
-                    colors = CardDefaults.cardColors(containerColor = SurfaceDark)
+                    colors = CardDefaults.cardColors(containerColor = SurfaceLevel1)
                 ) {
                     Box(modifier = Modifier.padding(16.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
                         Text(name, color = TacticalAmber, fontFamily = FontFamily.Monospace, fontSize = 14.sp)
