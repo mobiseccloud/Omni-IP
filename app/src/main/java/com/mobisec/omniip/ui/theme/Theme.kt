@@ -20,12 +20,14 @@ private val DarkColorScheme = darkColorScheme(
     secondary = TacticalAmber,
     tertiary = AlertRed,
     background = PureBlack,
-    surface = SurfaceDark,
+    surface = SurfaceLevel1,
+    surfaceVariant = SurfaceLevel2,
     onPrimary = PureBlack,
     onSecondary = PureBlack,
     onTertiary = PureBlack,
     onBackground = TextPrimary,
-    onSurface = TextPrimary
+    onSurface = TextPrimary,
+    onSurfaceVariant = TextPrimary
 )
 
 private val LightColorScheme = lightColorScheme(
@@ -54,6 +56,7 @@ fun OmniIPTheme(
     MaterialTheme(
         colorScheme = colorScheme,
         typography = Typography,
+        shapes = Shapes,
         content = content
     )
 }
