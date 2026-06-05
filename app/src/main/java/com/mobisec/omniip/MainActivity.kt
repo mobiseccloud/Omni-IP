@@ -1,6 +1,10 @@
 package com.mobisec.omniip
 
+import androidx.compose.foundation.horizontalScroll
 import android.app.Activity
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import android.content.Context
 import android.content.Intent
 import android.net.VpnService
@@ -275,9 +279,7 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     fun TelemetryScreen(viewModel: TelemetryViewModel) {
-        val connections by viewModel.connections.collectAsState()
-        var selectedTelemetry by remember { mutableStateOf<ConnectionTelemetry?>(null) }
-        var showBottomSheet by remember { mutableStateOf(false) }
+        val appSummaries by viewModel.appSummaries.collectAsState()
 
         Column(modifier = Modifier.fillMaxSize()) {
             LazyColumn(
@@ -285,27 +287,128 @@ class MainActivity : ComponentActivity() {
                 contentPadding = PaddingValues(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                items(connections) { telemetry ->
-                    TelemetryItem(telemetry) {
-                        selectedTelemetry = telemetry
-                        showBottomSheet = true
+                items(appSummaries) { summary ->
+                    AppSummaryCard(summary)
+                }
+            }
+        }
+    }
+
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Composable
+    fun AppSummaryCard(summary: com.mobisec.omniip.model.AppConnectionSummary) {
+        var expanded by remember { mutableStateOf(false) }
+        var selectedFilter by remember { mutableStateOf("All") }
+
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(4.dp)
+        ) {
+            Column {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { expanded = !expanded }
+                        .padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val icon = summary.appIcon
+                    if (icon != null) {
+                        Image(
+                            bitmap = icon.toBitmap().asImageBitmap(),
+                            contentDescription = "App Icon",
+                            modifier = Modifier.size(48.dp)
+                        )
+                    } else {
+                        Box(modifier = Modifier
+                            .size(48.dp)
+                            .background(TextSecondary))
+                    }
+
+                    Spacer(modifier = Modifier.width(16.dp))
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = summary.appName,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.SansSerif,
+                            fontSize = 16.sp
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("[TX: ${summary.totalTx}]", color = MatrixGreen, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 12.sp)
+                            Text("[RX: ${summary.totalRx}]", color = TacticalAmber, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 12.sp)
+                            Text("[BLK: ${summary.totalBlocked}]", color = AlertRed, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 12.sp)
+                        }
+                    }
+
+                    IconToggleButton(checked = expanded, onCheckedChange = { expanded = it }) {
+                        Icon(
+                            imageVector = if (expanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                            contentDescription = "Expand/Collapse",
+                            tint = MatrixGreen
+                        )
+                    }
+                }
+
+                androidx.compose.animation.AnimatedVisibility(visible = expanded) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
+                        // Filter Chips
+                        Row(
+                            modifier = Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(bottom = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            listOf("All", "Tx", "Rx", "Blocked").forEach { filter ->
+                                FilterChip(
+                                    selected = selectedFilter == filter,
+                                    onClick = { selectedFilter = filter },
+                                    label = { Text(filter) },
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = MatrixGreen.copy(alpha = 0.2f),
+                                        selectedLabelColor = MatrixGreen
+                                    )
+                                )
+                            }
+                        }
+
+                        // Distinct Connections List
+                        val filteredConnections = summary.activeConnections.filter { conn ->
+                            when (selectedFilter) {
+                                "Tx" -> conn.direction == com.mobisec.omniip.model.ConnectionDirection.OUTBOUND
+                                "Rx" -> conn.direction == com.mobisec.omniip.model.ConnectionDirection.INBOUND
+                                "Blocked" -> conn.isBlocked
+                                else -> true
+                            }
+                        }
+
+                        filteredConnections.forEach { conn ->
+                            ConnectionRow(conn)
+                            Spacer(modifier = Modifier.height(4.dp))
+                        }
                     }
                 }
             }
         }
-
-        if (showBottomSheet && selectedTelemetry != null) {
-            ActionBottomSheet(
-                telemetry = selectedTelemetry!!,
-                onDismiss = { showBottomSheet = false },
-                onAction = { targetType, targetValue, action ->
-                    viewModel.addRule(targetType, targetValue, action)
-                    showBottomSheet = false
-                }
-            )
-        }
     }
 
+    @Composable
+    fun ConnectionRow(conn: com.mobisec.omniip.model.ConnectionDetails) {
+        val statusColor = if (conn.isBlocked) AlertRed else MatrixGreen
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(modifier = Modifier.size(8.dp).background(statusColor, androidx.compose.foundation.shape.CircleShape))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(text = conn.protocol, color = TacticalAmber, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 12.sp, modifier = Modifier.width(40.dp))
+            Text(text = "${conn.destIp}:${conn.destPort}", color = MaterialTheme.colorScheme.onSurface, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 12.sp)
+        }
+    }
 
     private fun startVpn() {
         val sharedPrefs = getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
