@@ -1,3 +1,4 @@
+#include <sys/time.h>
 #include "security_config.h"
 #include <jni.h>
 #include <string>
@@ -28,6 +29,7 @@
 #include <unordered_map>
 
 std::mutex native_exec_mutex;
+static std::mutex g_pcap_write_mutex;
 
 struct FirewallRule {
     uint32_t ip_address;
@@ -721,7 +723,8 @@ Java_com_mobisec_omniip_core_NativeEngine_processPacketNative(
         JNIEnv* env,
         jobject /* this */,
         jobject packetBuffer,
-        jint length) {
+        jint length,
+        jint pcapFd) {
 
     if (!packetBuffer) return 0; // DROP
 
@@ -731,6 +734,27 @@ Java_com_mobisec_omniip_core_NativeEngine_processPacketNative(
         return 0; // DROP
     }
 
+    if (pcapFd >= 0) {
+        // 1. Prepare PCAP record
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        
+        uint32_t header[4];
+        header[0] = (uint32_t)tv.tv_sec;
+        header[1] = (uint32_t)tv.tv_usec;
+        header[2] = (uint32_t)length;
+        header[3] = (uint32_t)length;
+        
+        // 2. Atomic Write
+        std::lock_guard<std::mutex> lock(g_pcap_write_mutex);
+        
+        // 3. Write
+        if (write(pcapFd, header, 16) < 0 || write(pcapFd, bufferPtr, length) < 0) {
+            __android_log_write(ANDROID_LOG_ERROR, "OmniIP", "Failed to write to PCAP FD");
+        }
+    } // <--- ADD THIS CLOSING BRACE
+
+    // Now the Firewall/RASP logic runs independently of recording state:
     if (length < sizeof(IPv4Header)) {
         return 0; // DROP
     }
