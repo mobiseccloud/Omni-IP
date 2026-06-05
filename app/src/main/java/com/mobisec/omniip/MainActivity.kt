@@ -34,8 +34,8 @@ import androidx.core.graphics.drawable.toBitmap
 import androidx.compose.foundation.clickable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
 import com.mobisec.omniip.db.Action
 import com.mobisec.omniip.db.TargetType
 import com.mobisec.omniip.model.ConnectionDirection
@@ -120,15 +120,22 @@ class MainActivity : ComponentActivity() {
             OmniVpnService.isPcapRecordingFlow.value = false
             OmniVpnService.activePcapWriter?.close()
             OmniVpnService.activePcapWriter = null
+
+            val pcapFile = java.io.File(cacheDir, "session_capture.pcap")
+            if (pcapFile.exists()) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    com.mobisec.omniip.core.ExportEngine.shareFile(this@MainActivity, pcapFile, "application/vnd.tcpdump.pcap")
+                }
+            }
         }
     }
 
     private val rulesViewModel: RulesViewModel by viewModels()
-        val lanScannerViewModel: LanScannerViewModel by viewModels()
-        val dashboardViewModel: DashboardViewModel by viewModels()
-        val initViewModel: com.mobisec.omniip.viewmodel.InitViewModel by viewModels()
-        val startupViewModel: com.mobisec.omniip.viewmodel.StartupViewModel by viewModels()
-        val geoRulesViewModel: com.mobisec.omniip.viewmodel.GeoRulesViewModel by viewModels()
+    private val lanScannerViewModel: LanScannerViewModel by viewModels()
+    private val dashboardViewModel: DashboardViewModel by viewModels()
+    private val initViewModel: com.mobisec.omniip.viewmodel.InitViewModel by viewModels()
+    private val startupViewModel: com.mobisec.omniip.viewmodel.StartupViewModel by viewModels()
+    private val geoRulesViewModel: com.mobisec.omniip.viewmodel.GeoRulesViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -138,7 +145,6 @@ class MainActivity : ComponentActivity() {
 
         initViewModel.startInitialization()
 
-        // Schedule Threat Feed Worker
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.UNMETERED)
             .build()
@@ -155,10 +161,20 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             OmniIPTheme {
+                var isRaspCompromised by remember { mutableStateOf(false) }
+
+                LaunchedEffect(Unit) {
+                    try {
+                        com.mobisec.omniip.core.NativeEngine.executeSecuritySweep(this@MainActivity)
+                    } catch (e: Exception) {
+                        isRaspCompromised = true
+                    }
+                }
+
                 val isInitialized by initViewModel.isInitialized.collectAsState()
                 val initStatus by initViewModel.initStatus.collectAsState()
 
-                androidx.compose.runtime.LaunchedEffect(Unit) {
+                LaunchedEffect(Unit) {
                     startupViewModel.checkPermissions(this@MainActivity)
                 }
                 val missingPermissions by startupViewModel.missingPermissions.collectAsState()
@@ -221,97 +237,94 @@ class MainActivity : ComponentActivity() {
                         val mainTabs = listOf("Telemetry", "Firewall Matrix", "Threat Feeds", "Scanner", "Dashboard", "Toolkit", "GeoRules")
 
                         Column(modifier = Modifier.fillMaxSize()) {
-                        TopBar(
-                            onStartVpn = { startVpn() },
-                            onStopVpn = { stopVpn() }
-                        )
+                            TopBar(isRaspCompromised = isRaspCompromised)
 
-                        TabRow(
-                            selectedTabIndex = currentTab,
-                            containerColor = MaterialTheme.colorScheme.background,
-                            contentColor = MatrixGreen
-                        ) {
-                            mainTabs.forEachIndexed { index, title ->
-                                Tab(
-                                    selected = currentTab == index,
-                                    onClick = { currentTab = index },
-                                    text = { Text(title) }
-                                )
-                            }
-                        }
-
-                        if (currentTab == 0) {
-                            TelemetryScreen(viewModel)
-                        } else if (currentTab == 1) {
-                            RulesScreen(rulesViewModel)
-                        } else if (currentTab == 2) {
-                            var showArchitectureDoc by remember { mutableStateOf(false) }
-                            if (showArchitectureDoc) {
-                                com.mobisec.omniip.ui.ArchitectureDocScreen(onBack = { showArchitectureDoc = false })
-                            } else {
-                                com.mobisec.omniip.ui.SettingsScreen(onShowArchitectureDoc = { showArchitectureDoc = true })
-                            }
-                        } else if (currentTab == 3) {
-                            LanScannerScreen(lanScannerViewModel) { ip, action ->
-                                targetIp = ip
-                                initialAction = action
-                                currentTab = 4 // Navigate to Dashboard
-                            }
-                        } else if (currentTab == 4) {
-                            val terminalOutput by dashboardViewModel.terminalOutput.collectAsState()
-                            val isExecuting by dashboardViewModel.isExecuting.collectAsState()
-                            val showUpgradePrompt by dashboardViewModel.showUpgradePrompt.collectAsState()
-
-                            if (showUpgradePrompt) {
-                                AlertDialog(
-                                    onDismissRequest = { dashboardViewModel.dismissUpgradePrompt() },
-                                    title = { Text("Premium Feature") },
-                                    text = { Text("Port scanning is a premium feature. Upgrade to unlock.") },
-                                    confirmButton = {
-                                        Button(onClick = {
-                                            dashboardViewModel.dismissUpgradePrompt()
-                                            billingManager.launchBillingFlow(this@MainActivity, BillingManager.SKU_PERSONAL_TIER)
-                                        }) {
-                                            Text("OK")
-                                        }
-                                    }
-                                )
-                            }
-
-                            val isRecording by OmniVpnService.isPcapRecordingFlow.collectAsState()
-                            val pcapSize by OmniVpnService.pcapFileSizeFlow.collectAsState()
-                            val targetUid = OmniVpnService.targetRecordUid
-                            val appInfo = targetUid?.let { OmniVpnService.appInfoCache.getIfPresent(it) }
-                            val targetName = if (targetUid == null) "All Traffic" else (appInfo?.first ?: "Unknown App")
-                            val metrics by OmniVpnService.currentTargetMetricsFlow.collectAsState()
-                            val activeApps by OmniVpnService.activeAppsFlow.collectAsState()
-
-                            val isFirewallActive by dashboardViewModel.isFirewallActive.collectAsState()
-                            DashboardScreen(
-                                viewModel = dashboardViewModel,
-                                targetIp = targetIp,
-                                initialAction = initialAction,
-                                terminalOutput = terminalOutput,
-                                isExecuting = isExecuting,
-                                isRecording = isRecording,
-                                pcapSize = pcapSize,
-                                targetName = targetName,
-                                rxBytes = metrics.rxBytes,
-                                txBytes = metrics.txBytes,
-                                activeApps = activeApps,
-                                isFirewallActive = isFirewallActive,
-                                onExecuteAction = { ip, action -> dashboardViewModel.executeAction(ip, action) },
-                                onToggleRecording = { start, uid ->
-                                    if (start) {
-                                        startPcapRecording(uid)
-                                    } else {
-                                        stopPcapRecording()
-                                    }
-                                },
-                                onToggleFirewall = { isActive ->
-                                    dashboardViewModel.setFirewallActive(isActive)
+                            TabRow(
+                                selectedTabIndex = currentTab,
+                                containerColor = MaterialTheme.colorScheme.background,
+                                contentColor = MatrixGreen
+                            ) {
+                                mainTabs.forEachIndexed { index, title ->
+                                    Tab(
+                                        selected = currentTab == index,
+                                        onClick = { currentTab = index },
+                                        text = { Text(title) }
+                                    )
                                 }
-                            )
+                            }
+
+                            if (currentTab == 0) {
+                                TelemetryScreen(viewModel)
+                            } else if (currentTab == 1) {
+                                RulesScreen(rulesViewModel)
+                            } else if (currentTab == 2) {
+                                var showArchitectureDoc by remember { mutableStateOf(false) }
+                                if (showArchitectureDoc) {
+                                    com.mobisec.omniip.ui.ArchitectureDocScreen(onBack = { showArchitectureDoc = false })
+                                } else {
+                                    com.mobisec.omniip.ui.SettingsScreen(onShowArchitectureDoc = { showArchitectureDoc = true })
+                                }
+                            } else if (currentTab == 3) {
+                                LanScannerScreen(lanScannerViewModel) { ip, action ->
+                                    targetIp = ip
+                                    initialAction = action
+                                    currentTab = 4 // Navigate to Dashboard
+                                }
+                            } else if (currentTab == 4) {
+                                val terminalOutput by dashboardViewModel.terminalOutput.collectAsState()
+                                val isExecuting by dashboardViewModel.isExecuting.collectAsState()
+                                val showUpgradePrompt by dashboardViewModel.showUpgradePrompt.collectAsState()
+
+                                if (showUpgradePrompt) {
+                                    AlertDialog(
+                                        onDismissRequest = { dashboardViewModel.dismissUpgradePrompt() },
+                                        title = { Text("Premium Feature") },
+                                        text = { Text("Port scanning is a premium feature. Upgrade to unlock.") },
+                                        confirmButton = {
+                                            Button(onClick = {
+                                                dashboardViewModel.dismissUpgradePrompt()
+                                                billingManager.launchBillingFlow(this@MainActivity, BillingManager.SKU_PERSONAL_TIER)
+                                            }) {
+                                                Text("OK")
+                                            }
+                                        }
+                                    )
+                                }
+
+                                val isRecording by OmniVpnService.isPcapRecordingFlow.collectAsState()
+                                val pcapSize by OmniVpnService.pcapFileSizeFlow.collectAsState()
+                                val targetUid = OmniVpnService.targetRecordUid
+                                val appInfo = targetUid?.let { OmniVpnService.appInfoCache.getIfPresent(it) }
+                                val targetName = if (targetUid == null) "All Traffic" else (appInfo?.first ?: "Unknown App")
+                                val metrics by OmniVpnService.currentTargetMetricsFlow.collectAsState()
+                                val activeApps by OmniVpnService.activeAppsFlow.collectAsState()
+
+                                val isFirewallActive by dashboardViewModel.isFirewallActive.collectAsState()
+                                DashboardScreen(
+                                    viewModel = dashboardViewModel,
+                                    targetIp = targetIp,
+                                    initialAction = initialAction,
+                                    terminalOutput = terminalOutput,
+                                    isExecuting = isExecuting,
+                                    isRecording = isRecording,
+                                    pcapSize = pcapSize,
+                                    targetName = targetName,
+                                    rxBytes = metrics.rxBytes,
+                                    txBytes = metrics.txBytes,
+                                    activeApps = activeApps,
+                                    isFirewallActive = isFirewallActive,
+                                    onExecuteAction = { ip, action -> dashboardViewModel.executeAction(ip, action) },
+                                    onToggleRecording = { start, uid ->
+                                        if (start) {
+                                            startPcapRecording(uid)
+                                        } else {
+                                            stopPcapRecording()
+                                        }
+                                    },
+                                    onToggleFirewall = { isActive ->
+                                        dashboardViewModel.setFirewallActive(isActive)
+                                    }
+                                )
                             } else if (currentTab == 5) {
                                 com.mobisec.omniip.ui.ToolkitNavHost(onRequirePremium = { dashboardViewModel.triggerUpgradePrompt() })
                             } else if (currentTab == 6) {
@@ -405,7 +418,6 @@ class MainActivity : ComponentActivity() {
 
                 androidx.compose.animation.AnimatedVisibility(visible = expanded) {
                     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
-                        // Filter Chips
                         Row(
                             modifier = Modifier.fillMaxWidth().horizontalScroll(androidx.compose.foundation.rememberScrollState()).padding(bottom = 8.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -423,7 +435,6 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
-                        // Distinct Connections List
                         val filteredConnections = summary.activeConnections.filter { conn ->
                             when (selectedFilter) {
                                 "Tx" -> conn.direction == com.mobisec.omniip.model.ConnectionDirection.OUTBOUND
@@ -469,32 +480,10 @@ class MainActivity : ComponentActivity() {
             Text(text = "${conn.destIp}:${conn.destPort}$geoText", color = MaterialTheme.colorScheme.onSurface, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 12.sp)
         }
     }
-
-    private fun startVpn() {
-        val sharedPrefs = getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
-        val hasAgreed = sharedPrefs.getBoolean("has_agreed_to_terms", false)
-        if (!hasAgreed) {
-            // Cannot start VPN if user hasn't agreed to terms
-            return
-        }
-
-        val intent = VpnService.prepare(this)
-        if (intent != null) {
-            vpnServiceLauncher.launch(intent)
-        } else {
-            val startIntent = Intent(this, OmniVpnService::class.java)
-            startService(startIntent)
-        }
-    }
-
-    private fun stopVpn() {
-        val stopIntent = Intent(this, OmniVpnService::class.java)
-        stopService(stopIntent)
-    }
 }
 
 @Composable
-fun TopBar(onStartVpn: () -> Unit, onStopVpn: () -> Unit) {
+fun TopBar(isRaspCompromised: Boolean = false) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -508,20 +497,6 @@ fun TopBar(onStartVpn: () -> Unit, onStopVpn: () -> Unit) {
             fontWeight = FontWeight.Bold,
             fontSize = 20.sp
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                onClick = onStartVpn,
-                colors = ButtonDefaults.buttonColors(containerColor = MatrixGreen, contentColor = MaterialTheme.colorScheme.background)
-            ) {
-                Text("START")
-            }
-            Button(
-                onClick = onStopVpn,
-                colors = ButtonDefaults.buttonColors(containerColor = TacticalAmber, contentColor = MaterialTheme.colorScheme.background)
-            ) {
-                Text("STOP")
-            }
-        }
     }
 }
 

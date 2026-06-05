@@ -17,7 +17,7 @@ import com.mobisec.omniip.viewmodel.GeoRulesViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun GeoRulesScreen(viewModel: GeoRulesViewModel = viewModel()) {
+fun GeoRulesScreen(viewModel: GeoRulesViewModel = viewModel(), onRequirePremium: () -> Unit = {}) {
     val rules by viewModel.rules.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
 
