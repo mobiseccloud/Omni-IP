@@ -94,7 +94,9 @@ class TelemetryViewModel(application: Application) : AndroidViewModel(applicatio
                             bytesTx = tx,
                             bytesRx = rx,
                             packetCount = 1,
-                            lastActive = System.currentTimeMillis()
+                            lastActive = System.currentTimeMillis(),
+                            countryCode = telemetry.countryCode,
+                            city = telemetry.city
                         )
                     )
                 }

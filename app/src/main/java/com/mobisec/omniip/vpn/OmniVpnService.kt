@@ -370,8 +370,8 @@ class OmniVpnService : VpnService() {
                     }
                 }
 
-                cityDbReader = DatabaseReader.Builder(cityDbFile).build()
-                asnDbReader = DatabaseReader.Builder(asnDbFile).build()
+                cityDbReader = DatabaseReader.Builder(cityDbFile).fileMode(com.maxmind.db.Reader.FileMode.MEMORY_MAPPED).build()
+                asnDbReader = DatabaseReader.Builder(asnDbFile).fileMode(com.maxmind.db.Reader.FileMode.MEMORY_MAPPED).build()
 
             } catch (e: java.net.UnknownHostException) {
                 Log.e(TAG, "Failed to initialize GeoIP databases: UnknownHostException", e)
