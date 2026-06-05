@@ -28,12 +28,13 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
     }
 }
 
-@Database(entities = [FirewallRule::class, ThreatFeedRule::class, ConnectionLog::class], version = 5, exportSchema = false)
+@Database(entities = [FirewallRule::class, ThreatFeedRule::class, ConnectionLog::class, GeoRule::class], version = 6, exportSchema = false)
 @TypeConverters(RoomConverters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun connectionLogDao(): ConnectionLogDao
     abstract fun firewallRuleDao(): FirewallRuleDao
     abstract fun threatFeedRuleDao(): ThreatFeedRuleDao
+    abstract fun geoRuleDao(): GeoRuleDao
 
     companion object {
         @Volatile

@@ -127,6 +127,8 @@ class MainActivity : ComponentActivity() {
         val lanScannerViewModel: LanScannerViewModel by viewModels()
         val dashboardViewModel: DashboardViewModel by viewModels()
         val initViewModel: com.mobisec.omniip.viewmodel.InitViewModel by viewModels()
+        val startupViewModel: com.mobisec.omniip.viewmodel.StartupViewModel by viewModels()
+        val geoRulesViewModel: com.mobisec.omniip.viewmodel.GeoRulesViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -156,11 +158,49 @@ class MainActivity : ComponentActivity() {
                 val isInitialized by initViewModel.isInitialized.collectAsState()
                 val initStatus by initViewModel.initStatus.collectAsState()
 
+                androidx.compose.runtime.LaunchedEffect(Unit) {
+                    startupViewModel.checkPermissions(this@MainActivity)
+                }
+                val missingPermissions by startupViewModel.missingPermissions.collectAsState()
+
+                val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+                    ActivityResultContracts.RequestMultiplePermissions()
+                ) {
+                    startupViewModel.checkPermissions(this@MainActivity)
+                }
+                val vpnLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+                    ActivityResultContracts.StartActivityForResult()
+                ) {
+                    startupViewModel.checkPermissions(this@MainActivity)
+                }
+
                 Surface(
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    if (!isInitialized) {
+                    if (missingPermissions.isNotEmpty()) {
+                        com.mobisec.omniip.ui.StartupPermissionDialog(
+                            missingPermissions = missingPermissions,
+                            onRequestPermissions = {
+                                val perms = mutableListOf<String>()
+                                if (missingPermissions.contains("POST_NOTIFICATIONS") && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                                    perms.add(android.Manifest.permission.POST_NOTIFICATIONS)
+                                }
+                                if (missingPermissions.contains("FOREGROUND_SERVICE_SPECIAL_USE") && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                                    perms.add(android.Manifest.permission.FOREGROUND_SERVICE_SPECIAL_USE)
+                                }
+                                if (perms.isNotEmpty()) {
+                                    permissionLauncher.launch(perms.toTypedArray())
+                                }
+                                if (missingPermissions.contains("VPN_PREPARATION")) {
+                                    val intent = startupViewModel.requestVpnPreparation(this@MainActivity)
+                                    if (intent != null) {
+                                        vpnLauncher.launch(intent)
+                                    }
+                                }
+                            }
+                        )
+                    } else if (!isInitialized) {
                         Box(
                             modifier = Modifier
                                 .fillMaxSize()
@@ -178,7 +218,7 @@ class MainActivity : ComponentActivity() {
                         var currentTab by remember { mutableStateOf(0) }
                         var targetIp by remember { mutableStateOf("") }
                         var initialAction by remember { mutableStateOf("NONE") }
-                        val mainTabs = listOf("Telemetry", "Firewall Matrix", "Threat Feeds", "Scanner", "Dashboard", "Toolkit")
+                        val mainTabs = listOf("Telemetry", "Firewall Matrix", "Threat Feeds", "Scanner", "Dashboard", "Toolkit", "GeoRules")
 
                         Column(modifier = Modifier.fillMaxSize()) {
                         TopBar(
@@ -205,7 +245,12 @@ class MainActivity : ComponentActivity() {
                         } else if (currentTab == 1) {
                             RulesScreen(rulesViewModel)
                         } else if (currentTab == 2) {
-                            com.mobisec.omniip.ui.SettingsScreen()
+                            var showArchitectureDoc by remember { mutableStateOf(false) }
+                            if (showArchitectureDoc) {
+                                com.mobisec.omniip.ui.ArchitectureDocScreen(onBack = { showArchitectureDoc = false })
+                            } else {
+                                com.mobisec.omniip.ui.SettingsScreen(onShowArchitectureDoc = { showArchitectureDoc = true })
+                            }
                         } else if (currentTab == 3) {
                             LanScannerScreen(lanScannerViewModel) { ip, action ->
                                 targetIp = ip
@@ -269,6 +314,8 @@ class MainActivity : ComponentActivity() {
                             )
                             } else if (currentTab == 5) {
                                 com.mobisec.omniip.ui.ToolkitNavHost(onRequirePremium = { dashboardViewModel.triggerUpgradePrompt() })
+                            } else if (currentTab == 6) {
+                                com.mobisec.omniip.ui.GeoRulesScreen(geoRulesViewModel)
                             }
                         }
                     }
@@ -406,7 +453,20 @@ class MainActivity : ComponentActivity() {
             Box(modifier = Modifier.size(8.dp).background(statusColor, androidx.compose.foundation.shape.CircleShape))
             Spacer(modifier = Modifier.width(8.dp))
             Text(text = conn.protocol, color = TacticalAmber, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 12.sp, modifier = Modifier.width(40.dp))
-            Text(text = "${conn.destIp}:${conn.destPort}", color = MaterialTheme.colorScheme.onSurface, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 12.sp)
+
+            val geoText = if (conn.countryCode != null && conn.city != null) {
+                val flagOffset = 0x1F1E6
+                val asciiOffset = 0x41
+                val countryCodeUpper = conn.countryCode.uppercase()
+                val flag = if (countryCodeUpper.length == 2) {
+                    val firstChar = Character.codePointAt(countryCodeUpper, 0) - asciiOffset + flagOffset
+                    val secondChar = Character.codePointAt(countryCodeUpper, 1) - asciiOffset + flagOffset
+                    String(Character.toChars(firstChar)) + String(Character.toChars(secondChar))
+                } else ""
+                " $flag ${conn.countryCode}, ${conn.city}"
+            } else ""
+
+            Text(text = "${conn.destIp}:${conn.destPort}$geoText", color = MaterialTheme.colorScheme.onSurface, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 12.sp)
         }
     }
 

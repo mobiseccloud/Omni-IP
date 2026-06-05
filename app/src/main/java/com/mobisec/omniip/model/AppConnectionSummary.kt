@@ -12,7 +12,9 @@ data class ConnectionDetails(
     var bytesTx: Long = 0,
     var bytesRx: Long = 0,
     var packetCount: Long = 0,
-    var lastActive: Long = System.currentTimeMillis()
+    var lastActive: Long = System.currentTimeMillis(),
+    val countryCode: String? = null,
+    val city: String? = null
 )
 
 data class AppConnectionSummary(
