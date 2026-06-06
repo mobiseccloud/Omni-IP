@@ -56,6 +56,8 @@ class PcapWriter(private val pfd: ParcelFileDescriptor) {
         }
     }
 
+    fun getFd(): Int = pfd.fd
+
     suspend fun close() {
         withContext(Dispatchers.IO) {
             try {

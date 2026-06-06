@@ -35,7 +35,7 @@ import com.mobisec.omniip.core.ExportEngine
 import com.mobisec.omniip.core.ImportEngine
 
 @Composable
-fun RulesScreen(viewModel: RulesViewModel) {
+fun RulesScreen(viewModel: RulesViewModel, onRequirePremium: () -> Unit = {}) {
     var selectedTab by remember { mutableStateOf(0) }
     val tabs = listOf("Blocked", "Flagged", "Ignored")
     val rules by viewModel.rules.collectAsState()
@@ -78,7 +78,13 @@ fun RulesScreen(viewModel: RulesViewModel) {
                 }
                 var showAddDialog by remember { mutableStateOf(false) }
                 Button(
-                    onClick = { showAddDialog = true },
+                    onClick = { 
+                        if (viewModel.isEnterpriseUnlocked.value || viewModel.isPersonalUnlocked.value) {
+                            showAddDialog = true 
+                        } else {
+                            onRequirePremium()
+                        }
+                    },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                 ) {
                     Text("ADD MANUAL RULE")

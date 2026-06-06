@@ -1,3 +1,4 @@
+#include <sys/time.h>
 #include "security_config.h"
 #include <jni.h>
 #include <string>
@@ -721,7 +722,8 @@ Java_com_mobisec_omniip_core_NativeEngine_processPacketNative(
         JNIEnv* env,
         jobject /* this */,
         jobject packetBuffer,
-        jint length) {
+        jint length,
+        jint pcapFd) {
 
     if (!packetBuffer) return 0; // DROP
 
@@ -730,6 +732,23 @@ Java_com_mobisec_omniip_core_NativeEngine_processPacketNative(
         // Not a direct buffer, or failed to get address
         return 0; // DROP
     }
+
+    if (pcapFd != -1) {
+        // Write PCAP packet header and data directly
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        
+        uint32_t header[4];
+        header[0] = tv.tv_sec;
+        header[1] = tv.tv_usec;
+        header[2] = length;
+        header[3] = length;
+        
+        // Write header and data sequentially
+        write(pcapFd, header, 16);
+        write(pcapFd, bufferPtr, length);
+    }
+
 
     if (length < sizeof(IPv4Header)) {
         return 0; // DROP

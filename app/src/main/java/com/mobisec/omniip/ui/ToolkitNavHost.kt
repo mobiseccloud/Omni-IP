@@ -23,5 +23,7 @@ fun ToolkitNavHost(onRequirePremium: () -> Unit = {}) {
         composable("wifi") { WifiScannerScreen(onRequirePremium) }
         composable("netstats") { NetworkStatsScreen() }
         composable("dnsthreats") { DnsThreatFeedsScreen() }
+        composable("archdoc") { ArchitectureDocScreen() }
+        composable("appmatrix") { AppMatrixScreen() }
     }
 }

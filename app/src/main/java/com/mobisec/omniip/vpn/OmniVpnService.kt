@@ -370,8 +370,8 @@ class OmniVpnService : VpnService() {
                     }
                 }
 
-                cityDbReader = DatabaseReader.Builder(cityDbFile).build()
-                asnDbReader = DatabaseReader.Builder(asnDbFile).build()
+                cityDbReader = DatabaseReader.Builder(cityDbFile).fileMode(com.maxmind.db.Reader.FileMode.MEMORY_MAPPED).build()
+                asnDbReader = DatabaseReader.Builder(asnDbFile).fileMode(com.maxmind.db.Reader.FileMode.MEMORY_MAPPED).build()
 
             } catch (e: java.net.UnknownHostException) {
                 Log.e(TAG, "Failed to initialize GeoIP databases: UnknownHostException", e)
@@ -416,7 +416,7 @@ class OmniVpnService : VpnService() {
             if (length < 20) return // Min IPv4 header length
 
             // JNI Bridge parsing and firewall logic
-            val actionCode = com.mobisec.omniip.core.NativeEngine.processPacketNative(packet, length)
+            val actionCode = com.mobisec.omniip.core.NativeEngine.processPacketNative(packet, length, activePcapWriter?.getFd() ?: -1)
 
             val baseAction = actionCode and 0xFF
             val newLength = actionCode shr 8
@@ -522,12 +522,6 @@ class OmniVpnService : VpnService() {
             packet.position(0) // Reset position for further processing
 
             activePcapWriter?.let {
-                // Since PcapWriter switches context and we recycle the buffer immediately,
-                // we have to make a copy for the writer to avoid corruption. The prompt requirement
-                // "use strictly zero-allocation ByteBuffer manipulation" primarily applies to the
-                // main packet processing loop. For the side-channel PCAP we make one copy.
-                // Or better, let's just make the copy.
-                it.writePacket(buffer.copyOf(length), length)
                 pcapFileSizeFlow.value += length + 16 // 16 bytes for pcap packet header
             }
         }
