@@ -313,7 +313,6 @@ class MainActivity : ComponentActivity() {
                                     txBytes = metrics.txBytes,
                                     activeApps = activeApps,
                                     isFirewallActive = isFirewallActive,
-                                    isRaspCompromised = isRaspCompromised,
                                     onExecuteAction = { ip, action -> dashboardViewModel.executeAction(ip, action) },
                                     onToggleRecording = { start, uid ->
                                         if (start) {
@@ -323,7 +322,10 @@ class MainActivity : ComponentActivity() {
                                         }
                                     },
                                     onToggleFirewall = { isActive ->
-                                        dashboardViewModel.setFirewallActive(isActive)
+                                        // FIX: The RASP check belongs inside this action, not as a UI parameter
+                                        if (!isRaspCompromised) {
+                                            dashboardViewModel.setFirewallActive(isActive)
+                                        }
                                     }
                                 )
                             } else if (currentTab == 5) {
