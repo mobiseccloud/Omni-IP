@@ -16,7 +16,11 @@ import com.mobisec.omniip.core.SecurityPreferences
 
 class DashboardViewModel(application: Application, private val savedStateHandle: SavedStateHandle) : AndroidViewModel(application) {
     private val securityPreferences = SecurityPreferences(application)
-
+    
+    private val billingManager = com.mobisec.omniip.billing.BillingManager(application, androidx.lifecycle.viewModelScope)
+    val isPersonalUnlocked = billingManager.isPersonalUnlocked
+    val isEnterpriseUnlocked = billingManager.isEnterpriseUnlocked
+    
     private val _showPinAuthDialog = MutableStateFlow(false)
     val showPinAuthDialog: StateFlow<Boolean> = _showPinAuthDialog
 
