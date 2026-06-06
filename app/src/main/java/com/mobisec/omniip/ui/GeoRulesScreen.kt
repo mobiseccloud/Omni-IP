@@ -25,7 +25,13 @@ fun GeoRulesScreen(viewModel: GeoRulesViewModel = viewModel(), onRequirePremium:
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
             Text("GEOLOCATION RULES", color = MatrixGreen, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             Button(
-                onClick = { showAddDialog = true },
+                onClick = { 
+                    if (viewModel.isEnterpriseUnlocked.value || viewModel.isPersonalUnlocked.value) {
+                        showAddDialog = true 
+                    } else {
+                        onRequirePremium()
+                    }
+                },
                 colors = ButtonDefaults.buttonColors(containerColor = MatrixGreen)
             ) {
                 Text("ADD", color = PureBlack, fontWeight = FontWeight.Bold)
