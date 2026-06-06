@@ -313,6 +313,7 @@ class MainActivity : ComponentActivity() {
                                     txBytes = metrics.txBytes,
                                     activeApps = activeApps,
                                     isFirewallActive = isFirewallActive,
+                                    isRaspCompromised = isRaspCompromised,
                                     onExecuteAction = { ip, action -> dashboardViewModel.executeAction(ip, action) },
                                     onToggleRecording = { start, uid ->
                                         if (start) {
@@ -328,7 +329,7 @@ class MainActivity : ComponentActivity() {
                             } else if (currentTab == 5) {
                                 com.mobisec.omniip.ui.ToolkitNavHost(onRequirePremium = { dashboardViewModel.triggerUpgradePrompt() })
                             } else if (currentTab == 6) {
-                                com.mobisec.omniip.ui.GeoRulesScreen(geoRulesViewModel)
+                                com.mobisec.omniip.ui.GeoRulesScreen(geoRulesViewModel, onRequirePremium = { dashboardViewModel.triggerUpgradePrompt() })
                             }
                         }
                     }
