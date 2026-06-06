@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.graphics.drawable.toBitmap
 import androidx.lifecycle.AndroidViewModel
+import com.mobisec.omniip.billing.BillingManager
 import androidx.lifecycle.viewModelScope
 import com.mobisec.omniip.core.NativeEngine
 import com.mobisec.omniip.db.Action
@@ -21,6 +22,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
 class AppMatrixViewModel(application: Application) : AndroidViewModel(application) {
+
+    private val billingManager = BillingManager(application, viewModelScope)
+    val isPersonalUnlocked = billingManager.isPersonalUnlocked
+    val isEnterpriseUnlocked = billingManager.isEnterpriseUnlocked
+
     private val db = AppDatabase.getDatabase(application)
     private val dao = db.firewallRuleDao()
     private val packageManager = application.packageManager
