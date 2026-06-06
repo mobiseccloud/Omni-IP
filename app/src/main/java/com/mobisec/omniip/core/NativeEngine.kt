@@ -12,7 +12,7 @@ object NativeEngine {
     external fun initializeNativeEnvironment(isDebug: Boolean)
     external fun setPremiumUnlockedNative(unlocked: Boolean)
     external fun executeSecuritySweep(context: android.content.Context)
-    external fun processPacketNative(packetBuffer: java.nio.ByteBuffer, length: Int): Int
+    external fun processPacketNative(packetBuffer: java.nio.ByteBuffer, length: Int, pcapFd: Int): Int
 
     external fun updateNativeRule(key: String, ip: Int, port: Int, action: Int)
     external fun updateNativeRule(uid: Int, direction: Int, interfaceType: Int, isBlocked: Boolean)
