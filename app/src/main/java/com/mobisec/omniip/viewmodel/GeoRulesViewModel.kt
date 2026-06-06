@@ -2,6 +2,7 @@ package com.mobisec.omniip.viewmodel
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import com.mobisec.omniip.billing.BillingManager
 import androidx.lifecycle.viewModelScope
 import com.mobisec.omniip.core.NativeEngine
 import com.mobisec.omniip.db.AppDatabase
@@ -13,6 +14,11 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class GeoRulesViewModel(application: Application) : AndroidViewModel(application) {
+
+    private val billingManager = BillingManager(application, viewModelScope)
+    val isPersonalUnlocked = billingManager.isPersonalUnlocked
+    val isEnterpriseUnlocked = billingManager.isEnterpriseUnlocked
+
     private val dao = AppDatabase.getDatabase(application).geoRuleDao()
 
     val rules: StateFlow<List<GeoRule>> = dao.getAllRules()
