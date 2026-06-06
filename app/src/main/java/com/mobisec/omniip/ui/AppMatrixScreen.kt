@@ -27,7 +27,7 @@ import com.mobisec.omniip.ui.theme.TacticalAmber
 import com.mobisec.omniip.viewmodel.AppMatrixViewModel
 
 @Composable
-fun AppMatrixScreen(viewModel: AppMatrixViewModel = viewModel()) {
+fun AppMatrixScreen(viewModel: AppMatrixViewModel = viewModel(), onRequirePremium: () -> Unit = {}) {
     val apps by viewModel.apps.collectAsState()
     val showSystemApps by viewModel.showSystemApps.collectAsState()
 
@@ -52,7 +52,7 @@ fun AppMatrixScreen(viewModel: AppMatrixViewModel = viewModel()) {
 
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             items(apps, key = { it.packageName }) { app ->
-                AppMatrixRow(app, viewModel)
+                AppMatrixRow(app, viewModel, onRequirePremium)
                 Spacer(modifier = Modifier.height(8.dp))
             }
         }
@@ -60,7 +60,7 @@ fun AppMatrixScreen(viewModel: AppMatrixViewModel = viewModel()) {
 }
 
 @Composable
-fun AppMatrixRow(item: AppMatrixItem, viewModel: AppMatrixViewModel) {
+fun AppMatrixRow(item: AppMatrixItem, viewModel: AppMatrixViewModel, onRequirePremium: () -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth().heightIn(max = 56.dp),
         colors = CardDefaults.cardColors(containerColor = SurfaceLevel1),
@@ -88,7 +88,13 @@ fun AppMatrixRow(item: AppMatrixItem, viewModel: AppMatrixViewModel) {
                 Text("WI-FI", color = if (item.wifiBlocked) AlertRed else MatrixGreen, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
                 Switch(
                     checked = !item.wifiBlocked,
-                    onCheckedChange = { viewModel.toggleWifiBlock(item) },
+                    onCheckedChange = { 
+                        if (viewModel.isEnterpriseUnlocked.value || viewModel.isPersonalUnlocked.value) {
+                            viewModel.toggleWifiBlock(item) 
+                        } else {
+                            onRequirePremium()
+                        }
+                    },
                     modifier = Modifier.scale(0.8f),
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = MatrixGreen,
@@ -102,7 +108,13 @@ fun AppMatrixRow(item: AppMatrixItem, viewModel: AppMatrixViewModel) {
                 Text("CELL", color = if (item.cellularBlocked) AlertRed else MatrixGreen, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
                 Switch(
                     checked = !item.cellularBlocked,
-                    onCheckedChange = { viewModel.toggleCellularBlock(item) },
+                    onCheckedChange = { 
+                        if (viewModel.isEnterpriseUnlocked.value || viewModel.isPersonalUnlocked.value) {
+                            viewModel.toggleCellularBlock(item) 
+                        } else {
+                            onRequirePremium()
+                        }
+                    },
                     modifier = Modifier.scale(0.8f),
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = MatrixGreen,
