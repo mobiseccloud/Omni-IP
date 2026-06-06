@@ -2,6 +2,7 @@ package com.mobisec.omniip.viewmodel
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
+import com.mobisec.omniip.billing.BillingManager
 import androidx.lifecycle.viewModelScope
 import com.mobisec.omniip.db.Action
 import com.mobisec.omniip.db.AppDatabase
@@ -12,6 +13,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
 class RulesViewModel(application: Application) : AndroidViewModel(application) {
+
+    private val billingManager = BillingManager(application, viewModelScope)
+    val isPersonalUnlocked = billingManager.isPersonalUnlocked
+    val isEnterpriseUnlocked = billingManager.isEnterpriseUnlocked
+
     private val db = AppDatabase.getDatabase(application)
     private val dao = db.firewallRuleDao()
 
