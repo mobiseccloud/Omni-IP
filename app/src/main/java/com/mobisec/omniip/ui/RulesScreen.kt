@@ -78,7 +78,13 @@ fun RulesScreen(viewModel: RulesViewModel, onRequirePremium: () -> Unit = {}) {
                 }
                 var showAddDialog by remember { mutableStateOf(false) }
                 Button(
-                    onClick = { showAddDialog = true },
+                    onClick = { 
+                        if (viewModel.isEnterpriseUnlocked.value || viewModel.isPersonalUnlocked.value) {
+                            showAddDialog = true 
+                        } else {
+                            onRequirePremium()
+                        }
+                    },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                 ) {
                     Text("ADD MANUAL RULE")
