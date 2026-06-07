@@ -218,6 +218,30 @@ class OmniVpnService : VpnService() {
             stopSelf()
             return START_NOT_STICKY
         }
+        
+        if (intent?.action == "START_PCAP") {
+            kotlinx.coroutines.GlobalScope.launch {
+                try {
+                    val file = java.io.File(filesDir, PCAP_FILE_NAME)
+                    val pfd = android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_WRITE or android.os.ParcelFileDescriptor.MODE_CREATE or android.os.ParcelFileDescriptor.MODE_TRUNCATE)
+                    val writer = PcapWriter(pfd)
+                    writer.initialize()
+                    activePcapWriter = writer
+                    isPcapRecordingFlow.value = true
+                    pcapFileSizeFlow.value = 24L // global header
+                } catch (e: Exception) {
+                    android.util.Log.e(TAG, "Failed to start PCAP", e)
+                }
+            }
+            return START_STICKY
+        } else if (intent?.action == "STOP_PCAP") {
+            kotlinx.coroutines.GlobalScope.launch {
+                activePcapWriter?.close()
+                activePcapWriter = null
+                isPcapRecordingFlow.value = false
+            }
+            return START_STICKY
+        }
 
         isServiceRunning.value = true
 

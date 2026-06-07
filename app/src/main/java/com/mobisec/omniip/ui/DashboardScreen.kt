@@ -172,6 +172,10 @@ fun DashboardScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text("REC PCAP", color = if (isRecording) AlertRed else MatrixGreen, fontWeight = FontWeight.Bold, fontSize = MaterialTheme.typography.labelMedium.fontSize)
+                    if (isRecording || pcapSize > 0L) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(if (isRecording) "● ${pcapSize / 1024} KB" else "${pcapSize / 1024} KB", color = if (isRecording) AlertRed else TextSecondary, fontSize = 12.sp)
+                    }
                     Spacer(modifier = Modifier.weight(1f))
                     Switch(
                         checked = isRecording,
@@ -196,10 +200,10 @@ fun DashboardScreen(
                                 com.mobisec.omniip.core.ExportEngine.shareFile(context, pcapFile, "application/vnd.tcpdump.pcap")
                             }
                         },
-                        enabled = isRecording,
+                        enabled = pcapSize > 0L,
                         modifier = Modifier.size(32.dp)
                     ) {
-                        Icon(Icons.Default.Share, contentDescription = "Export PCAP", tint = if (isRecording) AlertRed else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
+                        Icon(Icons.Default.Share, contentDescription = "Export PCAP", tint = if (pcapSize > 0L) MatrixGreen else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f))
                     }
                 }
             }
