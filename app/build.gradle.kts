@@ -32,7 +32,7 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -59,7 +59,10 @@ android {
         }
     }
     lint {
-        abortOnError = false
+        // F-05: Fail lint on release builds to prevent regressions
+        abortOnError = true
+        // Lint check is still lenient on debug to avoid blocking dev flow
+        checkReleaseBuilds = true
     }
     externalNativeBuild {
         cmake {
@@ -96,8 +99,17 @@ android {
                         ByteArray(32) { 0 }
                     }
                 } else {
-                    // Fallback to zeros if release has no signing config right now
-                    ByteArray(32) { 0 }
+                    // F-05 fix: Throw on release builds that have no signing config.
+                    // A zero-hash in production allows the RASP check to be bypassed by
+                    // simply re-signing the APK with any key. Debug builds get zeros as before.
+                    if (variantName.contains("Release", ignoreCase = true)) {
+                        throw GradleException(
+                            "F-05 SECURITY GUARD: Release build attempted without a signing config. " +
+                            "The RASP signature hash cannot be zero in production. " +
+                            "Configure a signingConfig in android { } and try again."
+                        )
+                    }
+                    ByteArray(32) { 0 } // Debug builds: zero hash is acceptable
                 }
 
                 val obfuscatedHash = hashArray.map { (it.toInt() xor xorKey).toByte() }
@@ -161,4 +173,8 @@ dependencies {
     implementation("io.noties.markwon:core:4.6.2")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("dnsjava:dnsjava:3.5.3")
+
+    val shizukuVersion = "13.1.5"
+    implementation("dev.rikka.shizuku:api:$shizukuVersion")
+    implementation("dev.rikka.shizuku:provider:$shizukuVersion")
 }

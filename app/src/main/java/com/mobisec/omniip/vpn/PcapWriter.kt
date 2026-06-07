@@ -49,7 +49,7 @@ class PcapWriter(private val pfd: ParcelFileDescriptor) {
 
                 outputStream?.write(packetHeader.array())
                 outputStream?.write(packetData, 0, length)
-                outputStream?.flush()
+                // flush() removed: was causing one syscall per packet. Flush is now in close().
             } catch (e: Exception) {
                 // Ignore IOException during stream close
             }
@@ -61,6 +61,7 @@ class PcapWriter(private val pfd: ParcelFileDescriptor) {
     suspend fun close() {
         withContext(Dispatchers.IO) {
             try {
+                outputStream?.flush() // Ensure all buffered packets are flushed to disk
                 outputStream?.close()
             } catch (e: Exception) {
                 // Ignore

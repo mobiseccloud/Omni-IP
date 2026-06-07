@@ -24,6 +24,10 @@ class StartupViewModel(application: Application) : AndroidViewModel(application)
             }
         }
 
+        if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            missing.add("ACCESS_FINE_LOCATION")
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.FOREGROUND_SERVICE_SPECIAL_USE) != PackageManager.PERMISSION_GRANTED) {
                 missing.add("FOREGROUND_SERVICE_SPECIAL_USE")

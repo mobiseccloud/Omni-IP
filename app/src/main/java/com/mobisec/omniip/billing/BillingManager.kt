@@ -36,10 +36,10 @@ class BillingManager(private val context: Context, private val coroutineScope: C
         EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
     )
 
-    private val _isPersonalUnlocked = MutableStateFlow(sharedPrefs.getBoolean(KEY_IS_PREMIUM, false))
+    private val _isPersonalUnlocked = MutableStateFlow(com.mobisec.omniip.BuildConfig.DEBUG || sharedPrefs.getBoolean(KEY_IS_PREMIUM, false))
     val isPersonalUnlocked: StateFlow<Boolean> = _isPersonalUnlocked
 
-    private val _isEnterpriseUnlocked = MutableStateFlow(sharedPrefs.getBoolean(KEY_IS_ENTERPRISE, false))
+    private val _isEnterpriseUnlocked = MutableStateFlow(com.mobisec.omniip.BuildConfig.DEBUG || sharedPrefs.getBoolean(KEY_IS_ENTERPRISE, false))
     val isEnterpriseUnlocked: StateFlow<Boolean> = _isEnterpriseUnlocked
 
     private val purchasesUpdatedListener = PurchasesUpdatedListener { billingResult, purchases ->
@@ -62,7 +62,11 @@ class BillingManager(private val context: Context, private val coroutineScope: C
     private var productDetailsList: List<ProductDetails> = emptyList()
 
     init {
-        if (sharedPrefs.getBoolean(KEY_IS_PREMIUM, false) || sharedPrefs.getBoolean(KEY_IS_ENTERPRISE, false)) {
+        if (com.mobisec.omniip.BuildConfig.DEBUG) {
+            _isPersonalUnlocked.value = true
+            _isEnterpriseUnlocked.value = true
+            NativeEngine.setPremiumUnlockedNative(true)
+        } else if (sharedPrefs.getBoolean(KEY_IS_PREMIUM, false) || sharedPrefs.getBoolean(KEY_IS_ENTERPRISE, false)) {
             NativeEngine.setPremiumUnlockedNative(true)
         }
         connectToBillingService()

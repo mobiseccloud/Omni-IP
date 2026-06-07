@@ -27,6 +27,9 @@ import android.provider.Settings
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.ui.draw.scale
 
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -68,16 +71,20 @@ fun RulesScreen(viewModel: RulesViewModel, onRequirePremium: () -> Unit = {}) {
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MatrixGreen)
                 ) {
-                    Text("SHARE RULES")
+                    Icon(androidx.compose.material.icons.Icons.Default.Share, contentDescription = "Share", modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("SHARE")
                 }
                 Button(
                     onClick = { importLauncher.launch("application/json") },
                     colors = ButtonDefaults.buttonColors(containerColor = TacticalAmber)
                 ) {
-                    Text("IMPORT RULES")
+                    Icon(androidx.compose.material.icons.Icons.Default.KeyboardArrowDown, contentDescription = "Import", modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("IMPORT")
                 }
                 var showAddDialog by remember { mutableStateOf(false) }
-                Button(
+                IconButton(
                     onClick = { 
                         if (viewModel.isEnterpriseUnlocked.value || viewModel.isPersonalUnlocked.value) {
                             showAddDialog = true 
@@ -85,9 +92,9 @@ fun RulesScreen(viewModel: RulesViewModel, onRequirePremium: () -> Unit = {}) {
                             onRequirePremium()
                         }
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    modifier = Modifier.background(MaterialTheme.colorScheme.primary, shape = androidx.compose.foundation.shape.CircleShape)
                 ) {
-                    Text("ADD MANUAL RULE")
+                    Icon(androidx.compose.material.icons.Icons.Default.Add, contentDescription = "ADD RULE", tint = androidx.compose.ui.graphics.Color.White)
                 }
 
                 if (showAddDialog) {
@@ -191,7 +198,27 @@ fun RuleItem(rule: FirewallRule, viewModel: RulesViewModel) {
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(text = "Type: ${rule.targetType.name}", color = TextSecondary, fontSize = 12.sp)
-                Text(text = rule.targetValue, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                
+                var displayValue = rule.targetValue
+                if (rule.targetType == TargetType.APPLICATION) {
+                    try {
+                        val pm = context.packageManager
+                        val uid = rule.targetValue.toIntOrNull()
+                        if (uid != null) {
+                            val packages = pm.getPackagesForUid(uid)
+                            if (!packages.isNullOrEmpty()) {
+                                val packageName = packages[0]
+                                val appInfo = pm.getApplicationInfo(packageName, 0)
+                                val appName = pm.getApplicationLabel(appInfo).toString()
+                                displayValue = "$appName ($packageName) [UID: $uid]"
+                            }
+                        }
+                    } catch (e: Exception) {
+                        // fallback to just UID if PM fails
+                    }
+                }
+                
+                Text(text = displayValue, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold, fontSize = 16.sp)
             }
             Column(horizontalAlignment = Alignment.End) {
                 val color = when (rule.action) {

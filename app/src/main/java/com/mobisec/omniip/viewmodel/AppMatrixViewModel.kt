@@ -54,6 +54,11 @@ class AppMatrixViewModel(application: Application) : AndroidViewModel(applicatio
 
             val appList = installedPackages.mapNotNull { appInfo ->
                 val isSystem = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+                
+                // Enforce strict User vs System isolation
+                if (showSystemApps.value && !isSystem) {
+                    return@mapNotNull null
+                }
                 if (!showSystemApps.value && isSystem) {
                     return@mapNotNull null
                 }
@@ -145,6 +150,6 @@ class AppMatrixViewModel(application: Application) : AndroidViewModel(applicatio
         val directionInt = RuleDirection.BOTH.ordinal
         val isBlocked = blockWifi || blockMobile // any block means blocked by rules in engine side, depending on iface type
 
-        NativeEngine.updateNativeRule(item.uid, directionInt, interfaceTypeInt, isBlocked)
+        NativeEngine.updateNativeAppRule(item.uid, directionInt, interfaceTypeInt, isBlocked)
     }
 }

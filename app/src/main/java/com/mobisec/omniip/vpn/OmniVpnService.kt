@@ -2,7 +2,6 @@ package com.mobisec.omniip.vpn
 
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.drawable.Drawable
 import android.net.VpnService
 import android.net.ConnectivityManager
 import android.net.Network
@@ -93,9 +92,10 @@ class OmniVpnService : VpnService() {
     }
 
     class TokenBucket(val capacity: Int, val refillRateMs: Long) {
-        var tokens: Int = capacity
-        var lastRefillTimestamp: Long = System.currentTimeMillis()
+        @Volatile var tokens: Int = capacity
+        @Volatile var lastRefillTimestamp: Long = System.currentTimeMillis()
 
+        @Synchronized
         fun consume(): Boolean {
             val now = System.currentTimeMillis()
             val elapsed = now - lastRefillTimestamp
@@ -118,7 +118,7 @@ class OmniVpnService : VpnService() {
         const val ACTION_STOP_VPN = "com.mobisec.omniip.ACTION_STOP_VPN"
 
         // Pcap Integration
-        var activePcapWriter: PcapWriter? = null
+        @Volatile var activePcapWriter: PcapWriter? = null
         var pcapFileSizeFlow = kotlinx.coroutines.flow.MutableStateFlow(0L)
         var isPcapRecordingFlow = kotlinx.coroutines.flow.MutableStateFlow(false)
 
@@ -128,10 +128,11 @@ class OmniVpnService : VpnService() {
             .maximumSize(5000)
             .build<Int, ExfiltrationMetrics>()
         var activeAppsFlow = kotlinx.coroutines.flow.MutableStateFlow<List<Pair<Int, String>>>(emptyList())
+        // F-03: Stores only (appName, packageName) — no Drawable held in static cache to prevent OOM
         val appInfoCache = CacheBuilder.newBuilder()
             .expireAfterAccess(2, java.util.concurrent.TimeUnit.HOURS)
             .maximumSize(5000)
-            .build<Int, Triple<String, String, Drawable?>>()
+            .build<Int, Pair<String, String>>()
 
         private val sessionLogCache = CacheBuilder.newBuilder()
             .expireAfterWrite(10, java.util.concurrent.TimeUnit.MINUTES)
@@ -259,31 +260,10 @@ class OmniVpnService : VpnService() {
 
                     val key = "${rule.targetType.name}:${rule.targetValue}"
                     ruleCache.put(key, rule.action)
-
-                    // Parse target value into ip/port for native sync if it's an IP rule
-                    var ipInt = 0
-                    var portInt = 0
-                    if (rule.targetType == TargetType.IP_ADDRESS) {
-                        try {
-                            val inetAddr = java.net.InetAddress.getByName(rule.targetValue)
-                            val bytes = inetAddr.address
-                            if (bytes.size == 4) {
-                                ipInt = ((bytes[0].toInt() and 0xFF) shl 24) or
-                                        ((bytes[1].toInt() and 0xFF) shl 16) or
-                                        ((bytes[2].toInt() and 0xFF) shl 8) or
-                                        (bytes[3].toInt() and 0xFF)
-                            }
-                        } catch (e: Exception) {
-                            // ignore resolution errors for sync
-                        }
-                    }
-                    val actionInt = when (rule.action) {
-                        Action.BLOCK -> 0
-                        Action.IGNORE -> 1
-                        Action.FLAG -> 2
-                    }
-                    com.mobisec.omniip.core.NativeEngine.updateNativeRule(key, ipInt, portInt, actionInt)
                 }
+                
+                // Perform a single lock-free bulk sync across the JNI boundary
+                com.mobisec.omniip.core.NativeEngine.syncRulesToNative(rules)
             }
         }
 
@@ -539,9 +519,9 @@ class OmniVpnService : VpnService() {
             var direction: String? = null
             if (PacketUtils.isTcpSyn(packet, ihl)) {
                 if (sourceIp.hostAddress == "10.0.0.2") {
-                    direction = ConnectionDirection.OUTBOUND
+                    direction = ConnectionDirection.OUTBOUND_STR
                 } else if (destIp.hostAddress == "10.0.0.2") {
-                    direction = ConnectionDirection.INBOUND
+                    direction = ConnectionDirection.INBOUND_STR
                 }
             }
 
@@ -578,7 +558,7 @@ class OmniVpnService : VpnService() {
             var cityName: String? = null
             var asnName: String? = null
 
-            val targetIp = if (direction == ConnectionDirection.INBOUND) { sourceIp } else { destIp }
+            val targetIp = if (direction == ConnectionDirection.INBOUND_STR) { sourceIp } else { destIp }
 
             try {
                 if (!targetIp.isSiteLocalAddress && !targetIp.isLoopbackAddress) {
@@ -646,7 +626,7 @@ val targetIpString = targetIp.hostAddress ?: ""
             if (uid != -1 && (destPort == 53 || destPort == 80 || destPort == 443)) {
                 // Determine if this is DNS or TCP SYN
                 val isDns = destPort == 53
-                val isTcpSyn = protocol == 6 && direction == ConnectionDirection.OUTBOUND
+                val isTcpSyn = protocol == 6 && direction == ConnectionDirection.OUTBOUND_STR
 
                 if (isDns || isTcpSyn) {
                     val bucket = uidTokenBuckets.get(uid) {
@@ -798,9 +778,17 @@ val targetIpString = targetIp.hostAddress ?: ""
         }
     }
 
-    private fun getAppInfo(uid: Int): Triple<String, String, Drawable?> {
+    private fun getAppInfo(uid: Int): Triple<String, String, android.graphics.drawable.Drawable?> {
+        // Check if already resolved — only call PackageManager and update flows on new UIDs
+        val cached = appInfoCache.getIfPresent(uid)
+        if (cached != null) {
+            // Return with a null drawable — icon is loaded lazily in the UI layer
+            return Triple(cached.first, cached.second, null)
+        }
         val info = com.mobisec.omniip.core.UidMapper.getAppInfo(this, uid)
-        appInfoCache.put(uid, info)
+        // Store only name + package — no Drawable in static cache (F-03 fix)
+        appInfoCache.put(uid, Pair(info.first, info.second))
+        // F-03 fix: rebuild activeAppsFlow only when a new UID appears, not per-packet
         activeAppsFlow.value = appInfoCache.asMap().map { (u, i) -> u to i.first }
         return info
     }

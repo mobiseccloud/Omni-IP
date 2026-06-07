@@ -32,21 +32,22 @@ fun AppMatrixScreen(viewModel: AppMatrixViewModel = viewModel(), onRequirePremiu
     val showSystemApps by viewModel.showSystemApps.collectAsState()
 
     Column(modifier = Modifier.fillMaxSize().background(PureBlack).padding(16.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        val tabIndex = if (showSystemApps) 1 else 0
+        TabRow(
+            selectedTabIndex = tabIndex,
+            containerColor = PureBlack,
+            contentColor = MatrixGreen
         ) {
-            Text("APP FIREWALL MATRIX", color = MatrixGreen, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Sys", color = TacticalAmber, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-                Spacer(modifier = Modifier.width(4.dp))
-                Switch(
-                    checked = showSystemApps,
-                    onCheckedChange = { viewModel.toggleSystemApps() },
-                    colors = SwitchDefaults.colors(checkedThumbColor = MatrixGreen, checkedTrackColor = SurfaceLevel1, uncheckedThumbColor = Color.Gray, uncheckedTrackColor = SurfaceLevel1)
-                )
-            }
+            Tab(
+                selected = tabIndex == 0,
+                onClick = { if (showSystemApps) viewModel.toggleSystemApps() },
+                text = { Text("User") }
+            )
+            Tab(
+                selected = tabIndex == 1,
+                onClick = { if (!showSystemApps) viewModel.toggleSystemApps() },
+                text = { Text("System") }
+            )
         }
         Spacer(modifier = Modifier.height(16.dp))
 

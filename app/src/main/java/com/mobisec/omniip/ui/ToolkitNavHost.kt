@@ -11,6 +11,7 @@ fun ToolkitNavHost(onRequirePremium: () -> Unit = {}) {
 
     NavHost(navController = navController, startDestination = "toolkit") {
         composable("toolkit") { ToolkitScreen(navController) }
+        composable("lansweep") { LanScannerScreen() }
         composable("ping") { PingScreen() }
         composable("whois") { WhoisScreen() }
         composable("traceroute") { TracerouteScreen() }
@@ -23,7 +24,6 @@ fun ToolkitNavHost(onRequirePremium: () -> Unit = {}) {
         composable("wifi") { WifiScannerScreen(onRequirePremium) }
         composable("netstats") { NetworkStatsScreen() }
         composable("dnsthreats") { DnsThreatFeedsScreen() }
-        composable("archdoc") { ArchitectureDocScreen() }
-        composable("appmatrix") { AppMatrixScreen() }
+        composable("integrations") { GenericStubScreen("INTEGRATIONS MODULE") }
     }
 }

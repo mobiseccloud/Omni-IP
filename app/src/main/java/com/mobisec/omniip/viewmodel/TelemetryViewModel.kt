@@ -52,9 +52,9 @@ class TelemetryViewModel(application: Application) : AndroidViewModel(applicatio
 
                 if (telemetry.isBlocked) {
                     totalBlocked += 1
-                } else if (telemetry.direction == ConnectionDirection.OUTBOUND) {
+                } else if (telemetry.direction == ConnectionDirection.OUTBOUND_STR) {
                     totalTx += 1
-                } else if (telemetry.direction == ConnectionDirection.INBOUND) {
+                } else if (telemetry.direction == ConnectionDirection.INBOUND_STR) {
                     totalRx += 1
                 }
 
@@ -62,9 +62,9 @@ class TelemetryViewModel(application: Application) : AndroidViewModel(applicatio
                     val existing = currentConnections[existingIndex]
                     var tx = existing.bytesTx
                     var rx = existing.bytesRx
-                    if (telemetry.direction == ConnectionDirection.OUTBOUND) {
+                    if (telemetry.direction == ConnectionDirection.OUTBOUND_STR) {
                         tx += 1
-                    } else if (telemetry.direction == ConnectionDirection.INBOUND) {
+                    } else if (telemetry.direction == ConnectionDirection.INBOUND_STR) {
                         rx += 1
                     }
 
@@ -78,9 +78,9 @@ class TelemetryViewModel(application: Application) : AndroidViewModel(applicatio
                 } else {
                     var tx = 0L
                     var rx = 0L
-                    if (telemetry.direction == ConnectionDirection.OUTBOUND) {
+                    if (telemetry.direction == ConnectionDirection.OUTBOUND_STR) {
                         tx = 1L
-                    } else if (telemetry.direction == ConnectionDirection.INBOUND) {
+                    } else if (telemetry.direction == ConnectionDirection.INBOUND_STR) {
                         rx = 1L
                     }
                     currentConnections.add(
@@ -91,8 +91,8 @@ class TelemetryViewModel(application: Application) : AndroidViewModel(applicatio
                             destPort = telemetry.destPort,
                             isBlocked = telemetry.isBlocked,
                             direction = telemetry.direction,
-                            bytesTx = tx,
-                            bytesRx = rx,
+                            bytesTx = telemetry.txBytes.toLong() + tx,
+                            bytesRx = telemetry.rxBytes.toLong() + rx,
                             packetCount = 1,
                             lastActive = System.currentTimeMillis(),
                             countryCode = telemetry.countryCode,
@@ -101,11 +101,19 @@ class TelemetryViewModel(application: Application) : AndroidViewModel(applicatio
                     )
                 }
 
+                val sharedPrefs = application.getSharedPreferences("telemetry_prefs", android.content.Context.MODE_PRIVATE)
+                val inactiveLimit = sharedPrefs.getInt("inactive_records_limit", 50)
+                val now = System.currentTimeMillis()
+
+                val sortedConns = currentConnections.sortedByDescending { it.lastActive }
+                val activeList = sortedConns.filter { now - it.lastActive <= 30000 }
+                val inactiveList = sortedConns.filter { now - it.lastActive > 30000 }.take(inactiveLimit)
+
                 val newSummary = currentSummary.copy(
                     totalTx = totalTx,
                     totalRx = totalRx,
                     totalBlocked = totalBlocked,
-                    activeConnections = currentConnections.sortedByDescending { it.lastActive }
+                    activeConnections = (activeList + inactiveList).sortedByDescending { it.lastActive }
                 )
 
                 connectionStateMap[uid] = newSummary

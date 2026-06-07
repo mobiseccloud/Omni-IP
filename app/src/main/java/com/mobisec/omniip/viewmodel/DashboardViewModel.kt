@@ -2,6 +2,11 @@ package com.mobisec.omniip.viewmodel
 
 import android.app.Application
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.mobisec.omniip.core.NativeEngine
@@ -17,7 +22,7 @@ import com.mobisec.omniip.core.SecurityPreferences
 class DashboardViewModel(application: Application, private val savedStateHandle: SavedStateHandle) : AndroidViewModel(application) {
     private val securityPreferences = SecurityPreferences(application)
     
-    private val billingManager = com.mobisec.omniip.billing.BillingManager(application, androidx.lifecycle.viewModelScope)
+    private val billingManager = com.mobisec.omniip.billing.BillingManager(application, viewModelScope)
     val isPersonalUnlocked = billingManager.isPersonalUnlocked
     val isEnterpriseUnlocked = billingManager.isEnterpriseUnlocked
     
@@ -42,6 +47,17 @@ class DashboardViewModel(application: Application, private val savedStateHandle:
 
     private val _isFirewallActive = MutableStateFlow(false)
     val isFirewallActive: StateFlow<Boolean> = _isFirewallActive
+
+    private val _isRecording = MutableStateFlow(false)
+    val isRecording: StateFlow<Boolean> = _isRecording
+
+    private val _recordingTargetUid = MutableStateFlow<Int?>(null)
+    val recordingTargetUid: StateFlow<Int?> = _recordingTargetUid
+
+    fun setRecordingState(isRecording: Boolean, targetUid: Int?) {
+        _isRecording.value = isRecording
+        _recordingTargetUid.value = targetUid
+    }
 
     fun setFirewallActive(isActive: Boolean) {
         _isFirewallActive.value = isActive
@@ -88,9 +104,37 @@ class DashboardViewModel(application: Application, private val savedStateHandle:
         setFirewallActive(false)
     }
 
+    /** F-01 fix: Both FAST and DEEP scans require the Kotlin-side premium check before
+     * reaching the native layer. The native g_auth_state bitmask is now a second line
+     * of defense, not the sole gate. */
+    private fun isPremiumUnlocked(): Boolean {
+        return isPersonalUnlocked.value || isEnterpriseUnlocked.value
+    }
+
+    // --- Battery Optimization Helpers ---
+
+    enum class BatteryStatus { UNRESTRICTED, RESTRICTED }
+
+    fun checkBatteryOptimizationStatus(): BatteryStatus {
+        val pm = getApplication<Application>().getSystemService(Context.POWER_SERVICE) as PowerManager
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+            !pm.isIgnoringBatteryOptimizations(getApplication<Application>().packageName)
+        ) BatteryStatus.RESTRICTED else BatteryStatus.UNRESTRICTED
+    }
+
+    fun requestBatteryOptimizationExemption() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:${getApplication<Application>().packageName}")
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+            }
+            getApplication<Application>().startActivity(intent)
+        }
+    }
+
     fun executeAction(ip: String, action: String) {
-        // Phase 8 Implementation: Gate premium actions
-        if (action.contains("DEEP") && !(isPersonalUnlocked.value || isEnterpriseUnlocked.value)) {
+        // F-01 fix: Gate ALL premium scan types on the Kotlin layer before native bridge
+        if ((action == "PORTSCAN_FAST" || action == "PORTSCAN_DEEP") && !isPremiumUnlocked()) {
             _showUpgradePrompt.value = true
             return
         }

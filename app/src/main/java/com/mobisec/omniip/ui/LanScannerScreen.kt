@@ -10,6 +10,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -22,11 +24,11 @@ import com.mobisec.omniip.viewmodel.LanScannerViewModel
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LanScannerScreen(
-    viewModel: LanScannerViewModel,
-    onNavigateToDashboard: (String, String) -> Unit // IP and action
+    viewModel: LanScannerViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
 ) {
     val devices by viewModel.discoveredDevices.collectAsState()
     val isScanning by viewModel.isScanning.collectAsState()
+    val scanFeedback by viewModel.scanFeedback.collectAsState()
 
     var selectedDevice by remember { mutableStateOf<DiscoveredDevice?>(null) }
     var showBottomSheet by remember { mutableStateOf(false) }
@@ -54,9 +56,27 @@ fun LanScannerScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        if (scanFeedback != null) {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+            ) {
+                Text(
+                    text = scanFeedback!!,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(8.dp)
+                )
+            }
+        }
+
         if (isScanning && devices.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = MatrixGreen)
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(color = MatrixGreen, modifier = Modifier.size(64.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Pinging subnet...", color = MatrixGreen, fontWeight = FontWeight.Bold)
+                }
             }
         } else if (devices.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -80,11 +100,7 @@ fun LanScannerScreen(
     if (showBottomSheet && selectedDevice != null) {
         DeviceActionBottomSheet(
             device = selectedDevice!!,
-            onDismiss = { showBottomSheet = false },
-            onAction = { ip, action ->
-                showBottomSheet = false
-                onNavigateToDashboard(ip, action)
-            }
+            onDismiss = { showBottomSheet = false }
         )
     }
 }
@@ -108,6 +124,9 @@ fun DeviceItem(device: DiscoveredDevice, onClick: () -> Unit) {
             Spacer(modifier = Modifier.width(16.dp))
             Column {
                 Text(text = device.ipAddress, color = MatrixGreen, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                if (device.hostname != "Unknown") {
+                    Text(text = device.hostname, color = Color.White, fontSize = 14.sp)
+                }
                 Text(text = "MAC: ${device.macAddress}", color = TextSecondary, fontSize = 12.sp)
                 Text(text = device.vendor, color = TacticalAmber, fontSize = 12.sp)
             }
@@ -119,8 +138,7 @@ fun DeviceItem(device: DiscoveredDevice, onClick: () -> Unit) {
 @Composable
 fun DeviceActionBottomSheet(
     device: DiscoveredDevice,
-    onDismiss: () -> Unit,
-    onAction: (String, String) -> Unit // (ip, actionName)
+    onDismiss: () -> Unit
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
@@ -129,54 +147,11 @@ fun DeviceActionBottomSheet(
         ) {
             Text(text = "Target Actions: ${device.ipAddress}", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = MaterialTheme.colorScheme.onSurface)
 
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("MAC: ${device.macAddress}", color = Color.Gray, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+            }
+
             HorizontalDivider(color = TextSecondary, thickness = 1.dp)
-
-            Button(
-                onClick = { onAction(device.ipAddress, "PING") },
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = MatrixGreen)
-            ) {
-                Text("Ping Target")
-            }
-
-            Button(
-                onClick = { onAction(device.ipAddress, "TRACEROUTE") },
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = TacticalAmber)
-            ) {
-                Text("Traceroute")
-            }
-
-            // Port Scan implementation with expander
-            var expandScanOptions by remember { mutableStateOf(false) }
-
-            Button(
-                onClick = { expandScanOptions = !expandScanOptions },
-                modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-            ) {
-                Text("Port Scan...")
-            }
-
-            if (expandScanOptions) {
-                Column(modifier = Modifier.padding(start = 16.dp, end = 16.dp)) {
-                    Button(
-                        onClick = { onAction(device.ipAddress, "PORTSCAN_FAST") },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
-                    ) {
-                        Text("Fast Scan (Top 100)")
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Button(
-                        onClick = { onAction(device.ipAddress, "PORTSCAN_DEEP") },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
-                    ) {
-                        Text("Deep Scan (Requires Premium)")
-                    }
-                }
-            }
 
             Spacer(modifier = Modifier.height(24.dp))
         }

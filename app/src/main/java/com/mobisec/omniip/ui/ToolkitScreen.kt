@@ -1,6 +1,23 @@
 package com.mobisec.omniip.ui
 
 import androidx.compose.foundation.background
+
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -700,4 +717,51 @@ private fun formatBytes(bytes: Long): String {
     if (mb < 1024) return String.format("%.2f MB", mb)
     val gb = mb / 1024.0
     return String.format("%.2f GB", gb)
+}
+
+@Composable
+fun ToolkitScreen(navController: androidx.navigation.NavController) {
+    val tools = listOf(
+        Triple("Lan Sweep", "lansweep", Icons.Default.Search),
+        Triple("Ping", "ping", Icons.Default.Send),
+        Triple("Whois", "whois", Icons.Default.Person),
+        Triple("Traceroute", "traceroute", Icons.Default.LocationOn),
+        Triple("DNS Lookup", "dns", Icons.Default.Search),
+        Triple("Port Scanner", "portscan", Icons.Default.Lock),
+        Triple("IP Calculator", "ipcalc", Icons.Default.Add),
+        Triple("Connection Log", "connlog", Icons.Default.List),
+        Triple("Router Setup", "router", Icons.Default.Home),
+        Triple("IP Converter", "ipconv", Icons.Default.Refresh),
+        Triple("WiFi Scanner", "wifi", Icons.Default.Search),
+        Triple("Network Stats", "netstats", Icons.Default.Info)
+    )
+
+    Column(modifier = Modifier.fillMaxSize().background(PureBlack).padding(16.dp)) {
+        Text("TACTICAL TOOLKIT", color = MatrixGreen, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+        Spacer(modifier = Modifier.height(16.dp))
+
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            items(tools) { (title, route, icon) ->
+                Card(
+                    modifier = Modifier.fillMaxWidth().height(100.dp).clickable { navController.navigate(route) },
+                    colors = CardDefaults.cardColors(containerColor = com.mobisec.omniip.ui.theme.SurfaceLevel1)
+                ) {
+                    Column(
+                        modifier = Modifier.fillMaxSize().padding(8.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(icon, contentDescription = title, tint = MatrixGreen, modifier = Modifier.size(32.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(title, color = MatrixGreen, fontSize = 14.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                    }
+                }
+            }
+        }
+    }
 }

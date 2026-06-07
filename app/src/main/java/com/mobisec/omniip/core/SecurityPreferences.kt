@@ -1,9 +1,12 @@
 package com.mobisec.omniip.core
 
 import android.content.Context
+import android.util.Base64
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
-import java.security.MessageDigest
+import java.security.SecureRandom
+import javax.crypto.SecretKeyFactory
+import javax.crypto.spec.PBEKeySpec
 
 class SecurityPreferences(context: Context) {
     private val masterKey = MasterKey.Builder(context)
@@ -33,9 +36,14 @@ class SecurityPreferences(context: Context) {
     }
 
     suspend fun setPin(plainPin: String) {
-        val hashedPin = hashPin(plainPin)
+        val salt = ByteArray(16)
+        SecureRandom().nextBytes(salt)
+        val hashedPin = hashPin(plainPin, salt)
+        val saltStr = Base64.encodeToString(salt, Base64.NO_WRAP)
+        
         sharedPreferences.edit()
             .putString("hashed_pin", hashedPin)
+            .putString("pin_salt", saltStr)
             .putBoolean("is_pin_lock_enabled", true)
             .apply()
     }
@@ -43,21 +51,25 @@ class SecurityPreferences(context: Context) {
     suspend fun removePin() {
         sharedPreferences.edit()
             .remove("hashed_pin")
+            .remove("pin_salt")
             .putBoolean("is_pin_lock_enabled", false)
             .apply()
     }
 
     suspend fun verifyPin(inputPin: String): Boolean {
         val storedHash = sharedPreferences.getString("hashed_pin", null)
-        if (storedHash == null) return false
-        val inputHash = hashPin(inputPin)
+        val storedSaltStr = sharedPreferences.getString("pin_salt", null)
+        if (storedHash == null || storedSaltStr == null) return false
+        
+        val salt = Base64.decode(storedSaltStr, Base64.NO_WRAP)
+        val inputHash = hashPin(inputPin, salt)
         return storedHash == inputHash
     }
 
-    private fun hashPin(pin: String): String {
-        val bytes = pin.toByteArray()
-        val md = MessageDigest.getInstance("SHA-256")
-        val digest = md.digest(bytes)
-        return digest.fold("") { str, it -> str + "%02x".format(it) }
+    private fun hashPin(pin: String, salt: ByteArray): String {
+        val spec = PBEKeySpec(pin.toCharArray(), salt, 10000, 256)
+        val factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+        val hash = factory.generateSecret(spec).encoded
+        return Base64.encodeToString(hash, Base64.NO_WRAP)
     }
 }

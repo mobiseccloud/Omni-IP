@@ -73,6 +73,21 @@ fun StartupPermissionDialog(missingPermissions: List<String>, onRequestPermissio
                     Spacer(modifier = Modifier.height(12.dp))
                 }
 
+                if (missingPermissions.contains("ACCESS_FINE_LOCATION")) {
+                    Text(
+                        text = "Location Services:",
+                        color = TacticalAmber,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
+                    Text(
+                        text = "Required for LAN scanning, identifying BSSID/SSID properties, and applying geo-fenced firewall rules. Location data is never transmitted remotely.",
+                        color = Color.White,
+                        fontSize = 14.sp
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                }
+
                 if (missingPermissions.contains("VPN_PREPARATION")) {
                     Text(
                         text = "VPN Preparation:",

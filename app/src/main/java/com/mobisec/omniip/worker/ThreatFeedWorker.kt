@@ -7,7 +7,8 @@ import androidx.work.WorkerParameters
 import com.google.common.hash.BloomFilter
 import com.google.common.hash.Funnels
 import com.mobisec.omniip.db.AppDatabase
-import com.mobisec.omniip.db.ThreatFeedRule
+import com.mobisec.omniip.db.HeuristicRule
+import com.mobisec.omniip.db.IntegrationEndpoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.BufferedReader
@@ -21,37 +22,53 @@ class ThreatFeedWorker(appContext: Context, workerParams: WorkerParameters) : Co
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         try {
             val db = AppDatabase.getDatabase(applicationContext)
-            val dao = db.threatFeedRuleDao()
+            val dao = db.integrationDao()
+            
+            // Ensure endpoints exist
+            val endpoints = dao.getAllEndpoints()
+            var adEndpoint = endpoints.find { it.baseUrl == "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts" }
+            if (adEndpoint == null) {
+                adEndpoint = IntegrationEndpoint(baseUrl = "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts", apiKey = null, endpointType = "DOMAIN_LIST", actionPolicy = "BLOCK", priorityLevel = 10, sequenceId = 0)
+                val id = dao.insertEndpoint(adEndpoint)
+                adEndpoint = adEndpoint.copy(id = id.toInt())
+            }
+
+            var malwareEndpoint = endpoints.find { it.baseUrl == "https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/firehol_level1.netset" }
+            if (malwareEndpoint == null) {
+                malwareEndpoint = IntegrationEndpoint(baseUrl = "https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/firehol_level1.netset", apiKey = null, endpointType = "IP_LIST", actionPolicy = "BLOCK", priorityLevel = 10, sequenceId = 0)
+                val id = dao.insertEndpoint(malwareEndpoint)
+                malwareEndpoint = malwareEndpoint.copy(id = id.toInt())
+            }
 
             val sharedPrefs = applicationContext.getSharedPreferences("threat_feeds", Context.MODE_PRIVATE)
             val adTrackerEnabled = sharedPrefs.getBoolean("ad_tracker_enabled", false)
             val malwareEnabled = sharedPrefs.getBoolean("malware_enabled", false)
 
             if (adTrackerEnabled) {
-                val adDomains = fetchList("https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts")
+                val adDomains = fetchList(adEndpoint.baseUrl)
                 if (adDomains.isNotEmpty()) {
-                    dao.deleteByFeedType("ad_tracker")
-                    val rules = adDomains.map { ThreatFeedRule(it, "ad_tracker") }
-                    // Insert in batches
-                    rules.chunked(5000).forEach { dao.insertAll(it) }
+                    dao.deleteHeuristicRulesByEndpointId(adEndpoint.id)
+                    val rules = adDomains.map { HeuristicRule(endpointId = adEndpoint.id, targetValue = it) }
+                    rules.chunked(5000).forEach { dao.insertHeuristicRules(it) }
                 }
             } else {
-                dao.deleteByFeedType("ad_tracker")
+                dao.deleteHeuristicRulesByEndpointId(adEndpoint.id)
             }
 
             if (malwareEnabled) {
-                val malwareIps = fetchList("https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/firehol_level1.netset")
+                val malwareIps = fetchList(malwareEndpoint.baseUrl)
                 if (malwareIps.isNotEmpty()) {
-                    dao.deleteByFeedType("malware")
-                    val rules = malwareIps.map { ThreatFeedRule(it, "malware") }
-                    rules.chunked(5000).forEach { dao.insertAll(it) }
+                    dao.deleteHeuristicRulesByEndpointId(malwareEndpoint.id)
+                    val rules = malwareIps.map { HeuristicRule(endpointId = malwareEndpoint.id, targetValue = it) }
+                    rules.chunked(5000).forEach { dao.insertHeuristicRules(it) }
                 }
             } else {
-                dao.deleteByFeedType("malware")
+                dao.deleteHeuristicRulesByEndpointId(malwareEndpoint.id)
             }
 
-            // Rebuild Bloom Filter
-            val allTargets = dao.getAllTargets()
+            // Rebuild Bloom Filter for C++ native
+            val allRules = dao.getAllHeuristicRules()
+            val allTargets = allRules.map { it.targetValue }.toSet()
             if (allTargets.isNotEmpty()) {
                 val bloomFilter = BloomFilter.create(
                     Funnels.stringFunnel(Charsets.UTF_8),

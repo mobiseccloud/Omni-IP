@@ -4,6 +4,7 @@
 #include <string>
 #include <shared_mutex>
 #include <atomic>
+#include <memory>
 
 // Simulating Nmap and Ping Execution via JNI Bridge
 // In a real scenario, this would use fork/exec or link against the native engines.
@@ -29,15 +30,17 @@
 #include <unordered_map>
 
 std::mutex native_exec_mutex;
+JavaVM* g_jvm = nullptr;
+static jclass g_telemetry_class = nullptr;
+static jmethodID g_telemetry_method = nullptr;
+static jmethodID g_protect_method = nullptr;
 
-struct FirewallRule {
-    uint32_t ip_address;
-    uint16_t port;
-    int action_code; // 0 = DROP, 1 = ALLOW, 2 = FLAG
+struct EnforcedRule {
+    uint8_t tx_action;
+    uint8_t rx_action;
 };
 
-static std::unordered_map<uint64_t, FirewallRule> g_native_rule_cache;
-static std::shared_mutex g_rule_mutex;
+static std::shared_ptr<std::unordered_map<uint64_t, EnforcedRule>> g_active_rules = std::make_shared<std::unordered_map<uint64_t, EnforcedRule>>();
 
 static std::unordered_map<uint64_t, bool> g_dns_blocklist;
 static std::shared_mutex g_dns_blocklist_mutex;
@@ -298,6 +301,16 @@ std::string exec(const char* cmd) {
 
         return result;
     }
+}
+
+extern "C" void edr_emit_telemetry(int sourcePort, const char* destIp, int destPort, int protocol, int txBytes, int rxBytes) {
+    if (!g_jvm || !g_telemetry_class || !g_telemetry_method) return;
+    JNIEnv *env;
+    if (g_jvm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) return;
+    
+    jstring jDestIp = env->NewStringUTF(destIp);
+    env->CallStaticVoidMethod(g_telemetry_class, g_telemetry_method, sourcePort, jDestIp, destPort, protocol, txBytes, rxBytes);
+    env->DeleteLocalRef(jDestIp);
 }
 
 extern "C" __attribute__ ((visibility ("default"))) JNIEXPORT jstring JNICALL
@@ -658,6 +671,13 @@ Java_com_mobisec_omniip_core_NativeEngine_executeSecuritySweep(
     verifyComponentRegistration(env, context);
 }
 
+extern "C" bool edr_protect_socket(int fd) {
+    if (!g_jvm || !g_telemetry_class || !g_protect_method) return false;
+    JNIEnv *env;
+    if (g_jvm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) return false;
+    return env->CallStaticBooleanMethod(g_telemetry_class, g_protect_method, fd);
+}
+
 extern "C" __attribute__ ((visibility ("default"))) JNIEXPORT void JNICALL
 Java_com_mobisec_omniip_core_NativeEngine_setPremiumUnlockedNative(
         JNIEnv* env,
@@ -670,27 +690,39 @@ Java_com_mobisec_omniip_core_NativeEngine_setPremiumUnlockedNative(
     }
 }
 
+#include <thread>
+#include <chrono>
+
 extern "C" __attribute__ ((visibility ("default"))) JNIEXPORT void JNICALL
-Java_com_mobisec_omniip_core_NativeEngine_updateNativeRule(
+Java_com_mobisec_omniip_core_NativeEngine_updateRulesBulk(
         JNIEnv* env,
         jobject /* this */,
-        jstring key,
-        jint ip,
-        jint port,
-        jint action) {
-    // The primitive key is calculated from the passed IP and port, bypassing string usage
-    uint64_t rule_key = ((uint64_t)static_cast<uint32_t>(ip) << 16) | static_cast<uint16_t>(port);
+        jlongArray keys,
+        jbyteArray tx_actions,
+        jbyteArray rx_actions) {
 
-    std::unique_lock<std::shared_mutex> lock(g_rule_mutex);
-    g_native_rule_cache[rule_key] = {static_cast<uint32_t>(ip), static_cast<uint16_t>(port), action};
-}
+    jsize len = env->GetArrayLength(keys);
+    auto new_rules = std::make_shared<std::unordered_map<uint64_t, EnforcedRule>>();
 
-extern "C" __attribute__ ((visibility ("default"))) JNIEXPORT void JNICALL
-Java_com_mobisec_omniip_core_NativeEngine_clearNativeRules(
-        JNIEnv* env,
-        jobject /* this */) {
-    std::unique_lock<std::shared_mutex> lock(g_rule_mutex);
-    g_native_rule_cache.clear();
+    if (len > 0) {
+        jlong* keys_arr = env->GetLongArrayElements(keys, nullptr);
+        jbyte* tx_arr = env->GetByteArrayElements(tx_actions, nullptr);
+        jbyte* rx_arr = env->GetByteArrayElements(rx_actions, nullptr);
+
+        for (jsize i = 0; i < len; ++i) {
+            uint64_t rule_key = static_cast<uint64_t>(keys_arr[i]);
+            (*new_rules)[rule_key] = {
+                static_cast<uint8_t>(tx_arr[i]),
+                static_cast<uint8_t>(rx_arr[i])
+            };
+        }
+
+        env->ReleaseLongArrayElements(keys, keys_arr, JNI_ABORT);
+        env->ReleaseByteArrayElements(tx_actions, tx_arr, JNI_ABORT);
+        env->ReleaseByteArrayElements(rx_actions, rx_arr, JNI_ABORT);
+    }
+
+    std::atomic_store(&g_active_rules, new_rules);
 }
 
 extern "C" __attribute__ ((visibility ("default"))) JNIEXPORT void JNICALL
@@ -792,20 +824,17 @@ Java_com_mobisec_omniip_core_NativeEngine_processPacketNative(
 
     uint64_t rule_key = ((uint64_t)dest_ip << 16) | dest_port;
 
-    // Step 1: Lock the rule cache using a shared mutex lock.
-    std::shared_lock<std::shared_mutex> lock(g_rule_mutex);
-
-    // Step 2: Check if the destination matches an entry in g_native_rule_cache.
-    auto it = g_native_rule_cache.find(rule_key);
-    if (it != g_native_rule_cache.end()) {
-        int action = it->second.action_code;
-        if (action == 0) return 0; // DROP
-        if (action == 2) return 2; // FLAG
-        if (action == 1) return 1; // ALLOW (explicit allow overrides threat feed)
+    // Step 1 & 2: Lock-free atomic read of rule cache
+    std::shared_ptr<std::unordered_map<uint64_t, EnforcedRule>> current_rules = std::atomic_load(&g_active_rules);
+    if (current_rules) {
+        auto it = current_rules->find(rule_key);
+        if (it != current_rules->end()) {
+            int action = it->second.tx_action;
+            if (action == 0) return 0; // DROP
+            if (action == 2) return 2; // FLAG
+            if (action == 1) return 1; // ALLOW (explicit allow overrides threat feed)
+        }
     }
-
-    // Release the manual rule lock
-    lock.unlock();
 
     // Step 3: Check native threat Bloom filter
     std::shared_lock<std::shared_mutex> bloom_lock(g_threat_bloom_mutex);
@@ -1055,6 +1084,22 @@ Java_com_mobisec_omniip_core_NativeEngine_processPacketNative(
     return 1; // ALLOW
 }
 
+extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
+    g_jvm = vm;
+    JNIEnv* env;
+    if (vm->GetEnv(reinterpret_cast<void**>(&env), JNI_VERSION_1_6) != JNI_OK) {
+        return JNI_ERR;
+    }
+    
+    jclass localClass = env->FindClass("com/mobisec/omniip/core/NativeEngine");
+    g_telemetry_class = reinterpret_cast<jclass>(env->NewGlobalRef(localClass));
+    g_telemetry_method = env->GetStaticMethodID(g_telemetry_class, "onTelemetryEvent", "(ILjava/lang/String;IIII)V");
+    g_protect_method = env->GetStaticMethodID(g_telemetry_class, "protectSocket", "(I)Z");
+    env->DeleteLocalRef(localClass);
+    
+    return JNI_VERSION_1_6;
+}
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_mobisec_omniip_core_NativeEngine_syncDnsBlocklist(
         JNIEnv* env,
@@ -1070,4 +1115,10 @@ Java_com_mobisec_omniip_core_NativeEngine_syncDnsBlocklist(
         }
         env->ReleaseLongArrayElements(domainHashes, elements, JNI_ABORT);
     }
+}
+
+extern "C" __attribute__((visibility("default"))) JNIEXPORT void JNICALL
+Java_com_mobisec_omniip_core_NativeEngine_clearNativeRules(JNIEnv* env, jobject /* this */) {
+    auto empty_rules = std::make_shared<std::unordered_map<uint64_t, EnforcedRule>>();
+    std::atomic_store(&g_active_rules, empty_rules);
 }

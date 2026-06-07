@@ -37,7 +37,7 @@ object UidMapper {
         return -2 // Fallback or unsupported
     }
 
-    private val appInfoCache = ConcurrentHashMap<Int, Triple<String, String, Drawable?>>()
+    private val appInfoCache = ConcurrentHashMap<Int, Pair<String, String>>()
 
     fun getAppInfo(context: Context, uid: Int): Triple<String, String, Drawable?> {
         if (uid == -2) {
@@ -45,7 +45,8 @@ object UidMapper {
         }
 
         if (appInfoCache.containsKey(uid)) {
-            return appInfoCache[uid]!!
+            val cached = appInfoCache[uid]!!
+            return Triple(cached.first, cached.second, null)
         }
 
         val pm = context.packageManager
@@ -67,7 +68,7 @@ object UidMapper {
             info = Triple("Unknown (UID $uid)", "uid:$uid", null)
         }
 
-        appInfoCache[uid] = info
+        appInfoCache[uid] = Pair(info.first, info.second)
         return info
     }
 }

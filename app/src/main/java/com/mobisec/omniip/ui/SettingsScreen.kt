@@ -1,4 +1,5 @@
 package com.mobisec.omniip.ui
+
 import kotlinx.coroutines.launch
 
 import android.content.Context
@@ -24,8 +25,42 @@ import java.io.File
 import android.os.PowerManager
 import android.provider.Settings
 import android.net.Uri
+import androidx.security.crypto.EncryptedSharedPreferences
+import androidx.security.crypto.MasterKey
 
+/**
+ * F-07 fix: Singleton wrapper for OSINT API keys backed by EncryptedSharedPreferences.
+ * Keys are stored using AES256-GCM/SIV so they cannot be read from a rooted device
+ * by simply inspecting the shared_prefs XML file.
+ */
+object OsintPreferences {
+    private const val FILE_NAME = "osint_prefs_encrypted"
 
+    private fun getPrefs(context: Context): android.content.SharedPreferences {
+        val masterKey = MasterKey.Builder(context)
+            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+            .build()
+        return EncryptedSharedPreferences.create(
+            context,
+            FILE_NAME,
+            masterKey,
+            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        )
+    }
+
+    fun getAlienVaultKey(context: Context): String =
+        getPrefs(context).getString("alienvault_key", "") ?: ""
+
+    fun setAlienVaultKey(context: Context, key: String) =
+        getPrefs(context).edit().putString("alienvault_key", key).apply()
+
+    fun getAbuseIpDbKey(context: Context): String =
+        getPrefs(context).getString("abuseipdb_key", "") ?: ""
+
+    fun setAbuseIpDbKey(context: Context, key: String) =
+        getPrefs(context).edit().putString("abuseipdb_key", key).apply()
+}
 @Composable
 fun SettingsScreen(onShowArchitectureDoc: () -> Unit = {}) {
     val context = LocalContext.current
@@ -37,14 +72,15 @@ fun SettingsScreen(onShowArchitectureDoc: () -> Unit = {}) {
     var malwareEnabled by remember { mutableStateOf(sharedPrefs.getBoolean("malware_enabled", false)) }
     var malwareAction by remember { mutableStateOf(Action.valueOf(sharedPrefs.getString("malware_action", Action.BLOCK.name) ?: Action.BLOCK.name)) }
 
-    // Dataset Management State
-    var geoIpCityExists by remember { mutableStateOf(File(context.filesDir, "GeoLite2-City.mmdb").exists()) }
-    var geoIpAsnExists by remember { mutableStateOf(File(context.filesDir, "GeoLite2-ASN.mmdb").exists()) }
+    // F-07 fix: API keys loaded from EncryptedSharedPreferences via OsintPreferences singleton
+    var alienVaultKey by remember { mutableStateOf(OsintPreferences.getAlienVaultKey(context)) }
+    var abuseIpDbKey by remember { mutableStateOf(OsintPreferences.getAbuseIpDbKey(context)) }
+
+    // F-04 (doc drift) fix: GeoIP existence check uses cacheDir to match where OmniVpnService writes it
+    var geoIpCityExists by remember { mutableStateOf(File(context.cacheDir, "GeoLite2-City.mmdb").exists()) }
+    var geoIpAsnExists by remember { mutableStateOf(File(context.cacheDir, "GeoLite2-ASN.mmdb").exists()) }
     var ouiExists by remember { mutableStateOf(File(context.filesDir, "oui.txt").exists()) }
     var malwareFeedExists by remember { mutableStateOf(File(context.filesDir, "threat_bloom.bin").exists()) }
-
-    var alienVaultKey by remember { mutableStateOf(sharedPrefs.getString("alienvault_key", "") ?: "") }
-    var abuseIpDbKey by remember { mutableStateOf(sharedPrefs.getString("abuseipdb_key", "") ?: "") }
 
     val securityPrefs = remember { com.mobisec.omniip.core.SecurityPreferences(context) }
     val coroutineScope = rememberCoroutineScope()
@@ -183,6 +219,7 @@ fun SettingsScreen(onShowArchitectureDoc: () -> Unit = {}) {
                         onClick = {
                             val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
                                 data = Uri.parse("package:${context.packageName}")
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
                             }
                             context.startActivity(intent)
                         },
@@ -282,6 +319,35 @@ fun SettingsScreen(onShowArchitectureDoc: () -> Unit = {}) {
         HorizontalDivider(color = TacticalAmber)
         Spacer(modifier = Modifier.height(24.dp))
 
+        Text("Telemetry Settings", fontSize = 20.sp, color = MatrixGreen)
+        Spacer(modifier = Modifier.height(16.dp))
+
+        var inactiveRecordsLimit by remember {
+            mutableStateOf(
+                context.getSharedPreferences("telemetry_prefs", Context.MODE_PRIVATE)
+                    .getInt("inactive_records_limit", 50)
+                    .toString()
+            )
+        }
+
+        OutlinedTextField(
+            value = inactiveRecordsLimit,
+            onValueChange = { newValue ->
+                inactiveRecordsLimit = newValue
+                newValue.toIntOrNull()?.let {
+                    context.getSharedPreferences("telemetry_prefs", Context.MODE_PRIVATE)
+                        .edit().putInt("inactive_records_limit", it).apply()
+                }
+            },
+            label = { Text("Inactive Connections per App") },
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number),
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+        HorizontalDivider(color = TacticalAmber)
+        Spacer(modifier = Modifier.height(24.dp))
+
         Text("Data Management", fontSize = 20.sp, color = MatrixGreen)
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -329,9 +395,20 @@ fun SettingsScreen(onShowArchitectureDoc: () -> Unit = {}) {
             value = alienVaultKey,
             onValueChange = {
                 alienVaultKey = it
-                sharedPrefs.edit().putString("alienvault_key", it).apply()
+                OsintPreferences.setAlienVaultKey(context, it)
             },
             label = { Text("AlienVault OTX API Key") },
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        OutlinedTextField(
+            value = abuseIpDbKey,
+            onValueChange = {
+                abuseIpDbKey = it
+                OsintPreferences.setAbuseIpDbKey(context, it)
+            },
+            label = { Text("AbuseIPDB API Key") },
             modifier = Modifier.fillMaxWidth()
         )
         Spacer(modifier = Modifier.height(8.dp))
@@ -386,17 +463,6 @@ fun SettingsScreen(onShowArchitectureDoc: () -> Unit = {}) {
             Text("Data Handling Policy", color = MatrixGreen)
         }
 
-        Spacer(modifier = Modifier.height(32.dp))
-
-        OutlinedTextField(
-            value = abuseIpDbKey,
-            onValueChange = {
-                abuseIpDbKey = it
-                sharedPrefs.edit().putString("abuseipdb_key", it).apply()
-            },
-            label = { Text("AbuseIPDB API Key") },
-            modifier = Modifier.fillMaxWidth()
-        )
     }
 }
 
