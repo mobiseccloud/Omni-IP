@@ -14,6 +14,8 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.items
@@ -511,15 +513,19 @@ fun ConnectionLogScreen(viewModel: ConnectionLogViewModel = viewModel()) {
         Spacer(modifier = Modifier.height(16.dp))
 
         val context = androidx.compose.ui.platform.LocalContext.current
-        Button(
-            onClick = {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            IconButton(onClick = {
                 val csvFile = viewModel.exportLogsToCsv(context)
                 com.mobisec.omniip.core.ExportEngine.shareFile(context, csvFile, "text/csv")
-            },
-            modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = MatrixGreen)
-        ) {
-            Text("EXPORT DATA")
+            }) {
+                Icon(Icons.Default.Share, contentDescription = "Export Data", tint = MatrixGreen)
+            }
+            IconButton(onClick = { viewModel.refreshLogs() }) {
+                Icon(Icons.Default.Refresh, contentDescription = "Refresh Logs", tint = MatrixGreen)
+            }
+            IconButton(onClick = { viewModel.clearLogs() }) {
+                Icon(Icons.Default.Delete, contentDescription = "Clear Logs", tint = AlertRed)
+            }
         }
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -552,8 +558,19 @@ fun ConnectionLogScreen(viewModel: ConnectionLogViewModel = viewModel()) {
                         Spacer(modifier = Modifier.height(4.dp))
                         val prefix = if (log.action == "BLOCK") "[BLOCKED] " else if (log.action == "FLAG") "[FLAGGED] " else ""
                         Text("$prefix${log.appName} -> ${log.destIp}:${log.destPort}", color = textColor, fontSize = 14.sp)
-                        if (log.countryCode != null || log.city != null || log.asn != null) {
-                            val geoStr = listOfNotNull(log.countryCode, log.city, log.asn).joinToString(" - ")
+                        
+                        if (!log.domainName.isNullOrBlank()) {
+                            Text("Domain: ${log.domainName}", color = textColor.copy(alpha = 0.8f), fontSize = 12.sp)
+                        }
+                        
+                        val protocolStr = log.protocol ?: "UNKNOWN"
+                        val srcIp = log.sourceIp ?: "Unknown"
+                        val srcPort = log.sourcePort?.toString() ?: "Unknown"
+                        val dirStr = log.direction ?: ""
+                        Text("$protocolStr $dirStr | Src: $srcIp:$srcPort", color = MatrixGreen.copy(alpha = 0.6f), fontSize = 12.sp)
+
+                        if (log.countryCode != null || log.city != null || log.asn != null || log.country != null) {
+                            val geoStr = listOfNotNull(log.city, log.country ?: log.countryCode, log.asn).joinToString(" - ")
                             Text(geoStr, color = MatrixGreen.copy(alpha = 0.6f), fontSize = 12.sp)
                         }
                     }

@@ -73,7 +73,11 @@ class TelemetryViewModel(application: Application) : AndroidViewModel(applicatio
                         bytesRx = rx,
                         packetCount = existing.packetCount + 1,
                         isBlocked = telemetry.isBlocked,
-                        lastActive = System.currentTimeMillis()
+                        lastActive = System.currentTimeMillis(),
+                        country = telemetry.country ?: existing.country,
+                        countryCode = telemetry.countryCode ?: existing.countryCode,
+                        city = telemetry.city ?: existing.city,
+                        domainName = telemetry.resolvedHostname ?: existing.domainName
                     )
                 } else {
                     var tx = 0L

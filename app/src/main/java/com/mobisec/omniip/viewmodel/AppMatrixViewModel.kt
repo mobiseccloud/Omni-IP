@@ -38,53 +38,54 @@ class AppMatrixViewModel(application: Application) : AndroidViewModel(applicatio
     val showSystemApps: StateFlow<Boolean> = _showSystemApps
 
     init {
-        loadApps()
+        viewModelScope.launch(Dispatchers.IO) {
+            kotlinx.coroutines.flow.combine(
+                dao.getAllRules(),
+                showSystemApps
+            ) { rules, showSystem ->
+                Pair(rules, showSystem)
+            }.collect { (rules, showSystem) ->
+                val installedPackages = packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
+                val ruleMap = rules.filter { it.targetType == TargetType.APPLICATION }.associateBy { it.targetValue }
+
+                val appList = installedPackages.mapNotNull { appInfo ->
+                    val isSystem = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+                    
+                    // Enforce strict User vs System isolation
+                    if (showSystem && !isSystem) {
+                        return@mapNotNull null
+                    }
+                    if (!showSystem && isSystem) {
+                        return@mapNotNull null
+                    }
+
+                    val packageName = appInfo.packageName
+                    val label = packageManager.getApplicationLabel(appInfo).toString()
+                    val iconBitmap = packageManager.getApplicationIcon(appInfo).toBitmap().asImageBitmap()
+                    val uid = appInfo.uid
+
+                    val rule = ruleMap[packageName]
+                    val wifiBlocked = rule?.blockWifi ?: false
+                    val cellularBlocked = rule?.blockMobile ?: false
+
+                    AppMatrixItem(
+                        uid = uid,
+                        label = label,
+                        packageName = packageName,
+                        iconBitmap = iconBitmap,
+                        isSystem = isSystem,
+                        wifiBlocked = wifiBlocked,
+                        cellularBlocked = cellularBlocked
+                    )
+                }.sortedBy { it.label }
+
+                _apps.value = appList
+            }
+        }
     }
 
     fun toggleSystemApps() {
         _showSystemApps.value = !_showSystemApps.value
-        loadApps()
-    }
-
-    private fun loadApps() {
-        viewModelScope.launch(Dispatchers.IO) {
-            val installedPackages = packageManager.getInstalledApplications(PackageManager.GET_META_DATA)
-            val rules = dao.getAllRulesSync().filter { it.targetType == TargetType.APPLICATION }
-            val ruleMap = rules.associateBy { it.targetValue }
-
-            val appList = installedPackages.mapNotNull { appInfo ->
-                val isSystem = (appInfo.flags and ApplicationInfo.FLAG_SYSTEM) != 0
-                
-                // Enforce strict User vs System isolation
-                if (showSystemApps.value && !isSystem) {
-                    return@mapNotNull null
-                }
-                if (!showSystemApps.value && isSystem) {
-                    return@mapNotNull null
-                }
-
-                val packageName = appInfo.packageName
-                val label = packageManager.getApplicationLabel(appInfo).toString()
-                val iconBitmap = packageManager.getApplicationIcon(appInfo).toBitmap().asImageBitmap()
-                val uid = appInfo.uid
-
-                val rule = ruleMap[packageName]
-                val wifiBlocked = rule?.blockWifi ?: false
-                val cellularBlocked = rule?.blockMobile ?: false
-
-                AppMatrixItem(
-                    uid = uid,
-                    label = label,
-                    packageName = packageName,
-                    iconBitmap = iconBitmap,
-                    isSystem = isSystem,
-                    wifiBlocked = wifiBlocked,
-                    cellularBlocked = cellularBlocked
-                )
-            }.sortedBy { it.label }
-
-            _apps.value = appList
-        }
     }
 
     fun toggleWifiBlock(item: AppMatrixItem) {
@@ -146,10 +147,6 @@ class AppMatrixViewModel(application: Application) : AndroidViewModel(applicatio
             dao.updateRule(rule)
         }
 
-        val interfaceTypeInt = interfaceRule.ordinal
-        val directionInt = RuleDirection.BOTH.ordinal
-        val isBlocked = blockWifi || blockMobile // any block means blocked by rules in engine side, depending on iface type
-
-        NativeEngine.updateNativeAppRule(item.uid, directionInt, interfaceTypeInt, isBlocked)
+        NativeEngine.syncRulesToNative(dao.getAllRulesSync())
     }
 }

@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 class ConnectionLogViewModel(application: Application) : AndroidViewModel(application) {
     private val dao = AppDatabase.getDatabase(application).connectionLogDao()
@@ -17,7 +18,12 @@ class ConnectionLogViewModel(application: Application) : AndroidViewModel(applic
     private val _selectedActions = MutableStateFlow(setOf("ALLOW", "BLOCK", "FLAG"))
     val selectedActions: StateFlow<Set<String>> = _selectedActions
 
-    val logs: StateFlow<List<ConnectionLog>> = _selectedActions
+    private val _refreshTrigger = MutableStateFlow(0)
+
+    val logs: StateFlow<List<ConnectionLog>> = kotlinx.coroutines.flow.combine(
+        _selectedActions,
+        _refreshTrigger
+    ) { actions, _ -> actions }
         .flatMapLatest { actions ->
             dao.getLogsByActions(actions.toList())
         }
@@ -36,11 +42,21 @@ class ConnectionLogViewModel(application: Application) : AndroidViewModel(applic
     fun exportLogsToCsv(context: android.content.Context): java.io.File {
         val file = java.io.File(context.cacheDir, "connection_logs.csv")
         file.bufferedWriter().use { out ->
-            out.write("Timestamp,App,Destination IP,Port,Action,ASN,Country,City\n")
+            out.write("Timestamp,App,Protocol,Source IP,Source Port,Destination IP,Destination Port,Domain,Action,Direction,ASN,Country,City\n")
             logs.value.forEach { log ->
-                out.write("${log.timestamp},${log.appName},${log.destIp},${log.destPort},${log.action},${log.asn},${log.countryCode},${log.city}\n")
+                out.write("${log.timestamp},${log.appName},${log.protocol ?: ""},${log.sourceIp ?: ""},${log.sourcePort ?: ""},${log.destIp},${log.destPort},${log.domainName ?: ""},${log.action},${log.direction ?: ""},${log.asn ?: ""},${log.country ?: ""},${log.city ?: ""}\n")
             }
         }
         return file
+    }
+
+    fun clearLogs() {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            dao.clearLogs()
+        }
+    }
+
+    fun refreshLogs() {
+        _refreshTrigger.value += 1
     }
 }

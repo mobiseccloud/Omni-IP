@@ -776,7 +776,13 @@ val targetIpString = targetIp.hostAddress ?: ""
                                 countryCode = countryIsoCode,
                                 city = cityName,
                                 appName = appInfo.first,
-                                action = actionStr
+                                action = actionStr,
+                                protocol = if (protocol == 6) { "TCP" } else { "UDP" },
+                                sourceIp = sourceIp.hostAddress ?: "",
+                                sourcePort = sourcePort,
+                                domainName = hostname,
+                                country = countryName,
+                                direction = direction
                             )
                         )
                     } catch(e: Exception) {
@@ -898,8 +904,14 @@ val targetIpString = targetIp.hostAddress ?: ""
                     asn = null,
                     countryCode = null,
                     city = null,
-                    appName = "DNS Resolver",
-                    action = "FAIL: $errorMsg"
+                    appName = "DNS SYSTEM",
+                    action = "ERROR",
+                    protocol = "UDP",
+                    sourceIp = null,
+                    sourcePort = null,
+                    domainName = null,
+                    country = null,
+                    direction = "OUTBOUND"
                 )
             )
         } catch(e: Exception) {

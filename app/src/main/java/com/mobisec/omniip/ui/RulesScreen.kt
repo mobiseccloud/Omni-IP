@@ -216,15 +216,8 @@ fun ApplicationRuleCard(rule: FirewallRule, onInfoClick: () -> Unit) {
     
     try {
         val pm = context.packageManager
-        val uid = rule.targetValue.toIntOrNull()
-        if (uid != null) {
-            val packages = pm.getPackagesForUid(uid)
-            if (!packages.isNullOrEmpty()) {
-                packageName = packages[0]
-                val appInfo = pm.getApplicationInfo(packageName, 0)
-                appName = pm.getApplicationLabel(appInfo).toString()
-            }
-        }
+        val appInfo = pm.getApplicationInfo(packageName, 0)
+        appName = pm.getApplicationLabel(appInfo).toString()
     } catch (e: Exception) {}
 
     RuleCardBase(rule, onInfoClick) {
@@ -377,15 +370,11 @@ fun FlagIgnoreDialogContent(rule: FirewallRule, viewModel: RulesViewModel, onDis
     if (rule.targetType == TargetType.APPLICATION) {
         DialogActionRow(Icons.Default.Info, "View App Info") {
             try {
-                val pm = context.packageManager
-                val packages = pm.getPackagesForUid(rule.targetValue.toInt())
-                if (!packages.isNullOrEmpty()) {
-                    val packageName = packages[0]
-                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                        data = Uri.parse("package:$packageName")
-                    }
-                    context.startActivity(intent)
+                val packageName = rule.targetValue
+                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.parse("package:$packageName")
                 }
+                context.startActivity(intent)
             } catch (e: Exception) {}
             onDismiss()
         }

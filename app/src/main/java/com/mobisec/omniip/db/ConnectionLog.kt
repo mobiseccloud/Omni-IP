@@ -13,5 +13,11 @@ data class ConnectionLog(
     val city: String?,
     val appName: String,
     val action: String, // ALLOW, BLOCK, FLAG
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val protocol: String? = null,
+    val sourceIp: String? = null,
+    val sourcePort: Int? = null,
+    val domainName: String? = null,
+    val country: String? = null,
+    val direction: String? = null
 )

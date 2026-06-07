@@ -10,6 +10,8 @@ import kotlinx.coroutines.flow.Flow
 interface ConnectionLogDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertLog(log: ConnectionLog)
+    @Query("DELETE FROM connection_logs")
+    suspend fun clearLogs()
 
     @Query("SELECT * FROM connection_logs ORDER BY timestamp DESC")
     fun getAllLogs(): Flow<List<ConnectionLog>>
