@@ -45,8 +45,7 @@ class DashboardViewModel(application: Application, private val savedStateHandle:
     private val _showUpgradePrompt = MutableStateFlow(false)
     val showUpgradePrompt: StateFlow<Boolean> = _showUpgradePrompt
 
-    private val _isFirewallActive = MutableStateFlow(false)
-    val isFirewallActive: StateFlow<Boolean> = _isFirewallActive
+    val isFirewallActive: StateFlow<Boolean> = com.mobisec.omniip.vpn.OmniVpnService.isServiceRunning
 
     private val _isRecording = MutableStateFlow(false)
     val isRecording: StateFlow<Boolean> = _isRecording
@@ -59,9 +58,7 @@ class DashboardViewModel(application: Application, private val savedStateHandle:
         _recordingTargetUid.value = targetUid
     }
 
-    fun setFirewallActive(isActive: Boolean) {
-        _isFirewallActive.value = isActive
-    }
+
 
     fun triggerUpgradePrompt() {
         _showUpgradePrompt.value = true
@@ -101,7 +98,6 @@ class DashboardViewModel(application: Application, private val savedStateHandle:
             action = com.mobisec.omniip.vpn.OmniVpnService.ACTION_STOP_VPN
         }
         getApplication<Application>().startService(stopIntent)
-        setFirewallActive(false)
     }
 
     /** F-01 fix: Both FAST and DEEP scans require the Kotlin-side premium check before

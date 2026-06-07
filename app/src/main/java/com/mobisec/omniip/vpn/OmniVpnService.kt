@@ -121,6 +121,7 @@ class OmniVpnService : VpnService() {
         @Volatile var activePcapWriter: PcapWriter? = null
         var pcapFileSizeFlow = kotlinx.coroutines.flow.MutableStateFlow(0L)
         var isPcapRecordingFlow = kotlinx.coroutines.flow.MutableStateFlow(false)
+        val isServiceRunning = kotlinx.coroutines.flow.MutableStateFlow(false)
 
         var targetRecordUid: Int? = null
         val exfiltrationTracker = CacheBuilder.newBuilder()
@@ -206,10 +207,13 @@ class OmniVpnService : VpnService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP_VPN) {
+            isServiceRunning.value = false
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return START_NOT_STICKY
         }
+
+        isServiceRunning.value = true
 
         if (vpnInterface != null) return START_STICKY
 
@@ -886,6 +890,7 @@ val targetIpString = targetIp.hostAddress ?: ""
 
 
     override fun onDestroy() {
+        isServiceRunning.value = false
         networkCallback?.let {
             val connectivityManager = getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as ConnectivityManager
             connectivityManager.unregisterNetworkCallback(it)

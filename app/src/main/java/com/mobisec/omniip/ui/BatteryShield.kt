@@ -74,7 +74,7 @@ fun BatteryShield(viewModel: DashboardViewModel) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
+                .padding(8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -84,19 +84,19 @@ fun BatteryShield(viewModel: DashboardViewModel) {
                     color = shieldColor.copy(alpha = if (isRestricted) pulseAlpha else 1f),
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 13.sp
+                    fontSize = MaterialTheme.typography.labelMedium.fontSize
                 )
                 Text(
                     statusDesc,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
-                    fontSize = 11.sp
+                    fontSize = MaterialTheme.typography.bodySmall.fontSize
                 )
             }
 
             // Brutalist wireframe pentagon status indicator
             Box(
                 modifier = Modifier
-                    .size(36.dp)
+                    .size(24.dp)
                     .alpha(if (isRestricted) pulseAlpha else 1f),
                 contentAlignment = Alignment.Center
             ) {

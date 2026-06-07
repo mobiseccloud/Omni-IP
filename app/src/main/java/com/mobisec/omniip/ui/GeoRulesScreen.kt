@@ -22,8 +22,7 @@ fun GeoRulesScreen(viewModel: GeoRulesViewModel = viewModel(), onRequirePremium:
     var showAddDialog by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize().background(PureBlack).padding(16.dp)) {
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("GEOLOCATION RULES", color = MatrixGreen, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
             Button(
                 onClick = { 
                     if (viewModel.isEnterpriseUnlocked.value || viewModel.isPersonalUnlocked.value) {

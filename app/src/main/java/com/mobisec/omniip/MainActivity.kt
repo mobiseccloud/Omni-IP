@@ -51,10 +51,9 @@ import androidx.compose.ui.Alignment
 fun TopBar(isRaspCompromised: Boolean) {
     Row(
         modifier = Modifier.fillMaxWidth().background(SurfaceLevel2).padding(16.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.End,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text("OMNI-IP FIREWALL", color = MatrixGreen, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
         if (isRaspCompromised) {
             Icon(Icons.Default.Warning, contentDescription = "Compromised", tint = AlertRed)
         }

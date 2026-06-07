@@ -737,7 +737,6 @@ fun ToolkitScreen(navController: androidx.navigation.NavController) {
     )
 
     Column(modifier = Modifier.fillMaxSize().background(PureBlack).padding(16.dp)) {
-        Text("TACTICAL TOOLKIT", color = MatrixGreen, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
         Spacer(modifier = Modifier.height(16.dp))
 
         LazyVerticalGrid(
