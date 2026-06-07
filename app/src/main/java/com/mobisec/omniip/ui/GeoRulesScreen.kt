@@ -51,7 +51,8 @@ fun GeoRulesScreen(viewModel: GeoRulesViewModel = viewModel(), onRequirePremium:
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Column {
-                            Text(rule.countryCode, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                            val locationText = if (!rule.city.isNullOrBlank()) "${rule.city}, ${rule.countryCode}" else rule.countryCode
+                            Text(locationText, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold, fontSize = 18.sp)
                             Text("Action: ${rule.action}", color = if (rule.action == "BLOCK") AlertRed else TacticalAmber, fontSize = 14.sp)
                         }
                         Button(
@@ -68,6 +69,7 @@ fun GeoRulesScreen(viewModel: GeoRulesViewModel = viewModel(), onRequirePremium:
 
     if (showAddDialog) {
         var selectedCountry by remember { mutableStateOf("") }
+        var selectedCity by remember { mutableStateOf("") }
         var selectedAction by remember { mutableStateOf("BLOCK") }
         var expanded by remember { mutableStateOf(false) }
         var actionExpanded by remember { mutableStateOf(false) }
@@ -107,6 +109,19 @@ fun GeoRulesScreen(viewModel: GeoRulesViewModel = viewModel(), onRequirePremium:
                     }
 
                     Spacer(modifier = Modifier.height(16.dp))
+                    
+                    OutlinedTextField(
+                        value = selectedCity,
+                        onValueChange = { selectedCity = it },
+                        label = { Text("City (Optional)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = MatrixGreen,
+                            unfocusedTextColor = MatrixGreen
+                        )
+                    )
+
+                    Spacer(modifier = Modifier.height(16.dp))
 
                     ExposedDropdownMenuBox(
                         expanded = actionExpanded,
@@ -143,7 +158,7 @@ fun GeoRulesScreen(viewModel: GeoRulesViewModel = viewModel(), onRequirePremium:
                 Button(
                     onClick = {
                         if (selectedCountry.isNotBlank()) {
-                            viewModel.addRule(selectedCountry, selectedAction)
+                            viewModel.addRule(selectedCountry, selectedCity.takeIf { it.isNotBlank() }, selectedAction)
                             showAddDialog = false
                         }
                     },

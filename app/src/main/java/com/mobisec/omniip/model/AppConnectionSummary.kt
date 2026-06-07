@@ -4,7 +4,10 @@ import android.graphics.drawable.Drawable
 
 data class ConnectionDetails(
     val signature: String,
+    val domainName: String?,
     val protocol: String,
+    val sourceIp: String,
+    val sourcePort: Int,
     val destIp: String,
     val destPort: Int,
     val isBlocked: Boolean,
@@ -14,6 +17,7 @@ data class ConnectionDetails(
     var packetCount: Long = 0,
     var lastActive: Long = System.currentTimeMillis(),
     val countryCode: String? = null,
+    val country: String? = null,
     val city: String? = null
 )
 

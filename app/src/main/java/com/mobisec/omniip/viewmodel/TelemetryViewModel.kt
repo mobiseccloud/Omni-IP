@@ -83,10 +83,19 @@ class TelemetryViewModel(application: Application) : AndroidViewModel(applicatio
                     } else if (telemetry.direction == ConnectionDirection.INBOUND_STR) {
                         rx = 1L
                     }
+
+                    var domainName = telemetry.resolvedHostname
+                    if (domainName != null && domainName.startsWith("[SNI] ")) {
+                        domainName = domainName.substring(6)
+                    }
+
                     currentConnections.add(
                         ConnectionDetails(
                             signature = signature,
+                            domainName = domainName,
                             protocol = telemetry.protocol,
+                            sourceIp = telemetry.sourceIp,
+                            sourcePort = telemetry.sourcePort,
                             destIp = telemetry.destIp,
                             destPort = telemetry.destPort,
                             isBlocked = telemetry.isBlocked,
@@ -96,24 +105,27 @@ class TelemetryViewModel(application: Application) : AndroidViewModel(applicatio
                             packetCount = 1,
                             lastActive = System.currentTimeMillis(),
                             countryCode = telemetry.countryCode,
+                            country = telemetry.country,
                             city = telemetry.city
                         )
                     )
                 }
 
                 val sharedPrefs = application.getSharedPreferences("telemetry_prefs", android.content.Context.MODE_PRIVATE)
-                val inactiveLimit = sharedPrefs.getInt("inactive_records_limit", 50)
+                val inactiveInLimit = sharedPrefs.getInt("inactive_in_records_limit", 50)
+                val inactiveOutLimit = sharedPrefs.getInt("inactive_out_records_limit", 50)
                 val now = System.currentTimeMillis()
 
                 val sortedConns = currentConnections.sortedByDescending { it.lastActive }
                 val activeList = sortedConns.filter { now - it.lastActive <= 30000 }
-                val inactiveList = sortedConns.filter { now - it.lastActive > 30000 }.take(inactiveLimit)
+                val inactiveInList = sortedConns.filter { now - it.lastActive > 30000 && it.direction == ConnectionDirection.INBOUND_STR }.take(inactiveInLimit)
+                val inactiveOutList = sortedConns.filter { now - it.lastActive > 30000 && it.direction != ConnectionDirection.INBOUND_STR }.take(inactiveOutLimit)
 
                 val newSummary = currentSummary.copy(
                     totalTx = totalTx,
                     totalRx = totalRx,
                     totalBlocked = totalBlocked,
-                    activeConnections = (activeList + inactiveList).sortedByDescending { it.lastActive }
+                    activeConnections = (activeList + inactiveInList + inactiveOutList).sortedByDescending { it.lastActive }
                 )
 
                 connectionStateMap[uid] = newSummary

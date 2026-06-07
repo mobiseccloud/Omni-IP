@@ -233,10 +233,8 @@ class MainActivity : ComponentActivity() {
                                                     startService(startIntent)
                                                 }
                                             } else {
-                                                val stopIntent = Intent(this@MainActivity, OmniVpnService::class.java).apply {
-                                                    action = OmniVpnService.ACTION_STOP_VPN
-                                                }
-                                                startService(stopIntent)
+                                                val stopIntent = Intent(this@MainActivity, OmniVpnService::class.java)
+                                                stopService(stopIntent)
                                             }
                                         },
                                         telemetryViewModel = telemetryViewModel

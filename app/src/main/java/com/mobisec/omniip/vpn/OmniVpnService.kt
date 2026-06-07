@@ -60,6 +60,7 @@ class OmniVpnService : VpnService() {
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     @Volatile private var isCellularActive = false
     private val _networkChangeTrigger = kotlinx.coroutines.flow.MutableStateFlow(0)
+    @Volatile private var geoRulesList: List<com.mobisec.omniip.db.GeoRule> = emptyList()
 
 
     private var vpnInterface: ParcelFileDescriptor? = null
@@ -248,6 +249,12 @@ class OmniVpnService : VpnService() {
                     }
                 }
                 delay(1000)
+            }
+        }
+
+        scope.launch(Dispatchers.IO) {
+            AppDatabase.getDatabase(this@OmniVpnService).geoRuleDao().getAllRules().collect { rules ->
+                geoRulesList = rules
             }
         }
 
@@ -596,6 +603,16 @@ val targetIpString = targetIp.hostAddress ?: ""
             var finalAction = Action.IGNORE // default allow if not in DB, mapped to ignore/allow
             var ruleApplied = false
 
+            val matchedGeo = geoRulesList.find { it.countryCode.equals(countryIsoCode, ignoreCase = true) && (it.city.isNullOrBlank() || it.city.equals(cityName, ignoreCase = true)) }
+            if (matchedGeo != null) {
+                if (matchedGeo.action == "BLOCK") {
+                    finalAction = Action.BLOCK
+                    ruleApplied = true
+                } else if (matchedGeo.action == "FLAG" && finalAction != Action.BLOCK) {
+                    finalAction = Action.FLAG
+                }
+            }
+
             // Check UID rule
             val uidKey = "${TargetType.APPLICATION.name}:$uid"
             if (ruleCache.getIfPresent(uidKey) != null) {
@@ -721,6 +738,8 @@ val targetIpString = targetIp.hostAddress ?: ""
                 packageName = appInfo.second,
                 appIcon = appInfo.third,
                 protocol = if (protocol == 6) { "TCP" } else { "UDP" },
+                sourceIp = sourceIp.hostAddress ?: "",
+                sourcePort = sourcePort,
                 destPort = destPort,
                 destIp = targetIpString,
                 resolvedHostname = hostname,

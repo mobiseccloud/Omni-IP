@@ -24,18 +24,16 @@ class GeoRulesViewModel(application: Application) : AndroidViewModel(application
     val rules: StateFlow<List<GeoRule>> = dao.getAllRules()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    fun addRule(countryCode: String, action: String) {
+    fun addRule(countryCode: String, city: String?, action: String) {
         viewModelScope.launch(Dispatchers.IO) {
-            val rule = GeoRule(countryCode = countryCode.uppercase(), action = action, timestamp = System.currentTimeMillis())
+            val rule = GeoRule(countryCode = countryCode.uppercase(), city = city, action = action, timestamp = System.currentTimeMillis())
             dao.insertRule(rule)
-            NativeEngine.updateGeoRule(rule.countryCode, action)
         }
     }
 
     fun deleteRule(rule: GeoRule) {
         viewModelScope.launch(Dispatchers.IO) {
             dao.deleteRule(rule)
-            NativeEngine.updateGeoRule(rule.countryCode, "REMOVE")
         }
     }
 }

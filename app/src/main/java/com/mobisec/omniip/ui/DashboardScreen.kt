@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.draw.alpha
 import com.mobisec.omniip.ui.theme.MatrixGreen
 import com.mobisec.omniip.ui.theme.TacticalAmber
 import androidx.compose.ui.Alignment
@@ -110,20 +111,7 @@ fun DashboardScreen(
     }
 
     val context = LocalContext.current
-    val vpnLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-        if (result.resultCode == android.app.Activity.RESULT_OK) {
-            isFirewallToggling = true
-            val intent = Intent(context, OmniVpnService::class.java)
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
-            onToggleFirewall(true)
-        } else {
-            isFirewallToggling = false
-        }
-    }
+
 
     val infiniteTransition = rememberInfiniteTransition()
     val pulseAlpha by infiniteTransition.animateFloat(
@@ -376,27 +364,40 @@ fun ConnectionTelemetryRow(conn: com.mobisec.omniip.model.ConnectionDetails) {
     val dirColor = if (conn.direction == com.mobisec.omniip.model.ConnectionDirection.OUTBOUND_STR) MatrixGreen else TacticalAmber
     val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
     val timeString = timeFormat.format(Date(conn.lastActive))
+    val isInactive = System.currentTimeMillis() - conn.lastActive > 30000
 
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp, horizontal = 4.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp, horizontal = 4.dp).alpha(if (isInactive) 0.5f else 1f),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(conn.direction ?: "UNKNOWN", color = dirColor, fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                if (isInactive) {
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("[INACTIVE]", color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), fontSize = 8.sp)
+                }
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(conn.protocol, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f), fontSize = 10.sp)
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(timeString, color = TextSecondary, fontSize = 10.sp)
             }
-            Text("${conn.destIp}:${conn.destPort}", color = MatrixGreen, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+            if (!conn.domainName.isNullOrBlank()) {
+                Text(conn.domainName, color = MatrixGreen, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Text("${conn.sourceIp}:${conn.sourcePort} -> ${conn.destIp}:${conn.destPort}", color = MatrixGreen, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
         }
         
         Column(horizontalAlignment = Alignment.End) {
             val statusColor = if (conn.isBlocked) AlertRed else MatrixGreen
             Text(if (conn.isBlocked) "BLOCKED" else "ALLOWED", color = statusColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-            if (conn.countryCode != null) {
+            if (conn.country != null || conn.city != null) {
+                val locationParts = listOfNotNull(conn.city, conn.country).filter { it.isNotBlank() }
+                if (locationParts.isNotEmpty()) {
+                    Text(locationParts.joinToString(", "), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f), fontSize = 10.sp)
+                }
+            } else if (conn.countryCode != null) {
                 Text(conn.countryCode, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f), fontSize = 10.sp)
             }
         }

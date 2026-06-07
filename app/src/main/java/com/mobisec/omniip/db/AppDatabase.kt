@@ -36,7 +36,16 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
     }
 }
 
-@Database(entities = [FirewallRule::class, ThreatFeedRule::class, ConnectionLog::class, GeoRule::class, IntegrationEndpoint::class, HeuristicRule::class], version = 7, exportSchema = false)
+val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        database.execSQL("CREATE TABLE IF NOT EXISTS `geo_rules_new` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `countryCode` TEXT NOT NULL, `city` TEXT, `action` TEXT NOT NULL, `timestamp` INTEGER NOT NULL)")
+        database.execSQL("INSERT INTO `geo_rules_new` (`countryCode`, `action`, `timestamp`) SELECT `countryCode`, `action`, `timestamp` FROM `geo_rules`")
+        database.execSQL("DROP TABLE `geo_rules`")
+        database.execSQL("ALTER TABLE `geo_rules_new` RENAME TO `geo_rules`")
+    }
+}
+
+@Database(entities = [FirewallRule::class, ThreatFeedRule::class, ConnectionLog::class, GeoRule::class, IntegrationEndpoint::class, HeuristicRule::class], version = 8, exportSchema = false)
 @TypeConverters(RoomConverters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun connectionLogDao(): ConnectionLogDao
@@ -56,7 +65,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "omni_ip_database"
                 )
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_6_7)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_6_7, MIGRATION_7_8)
                 .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE = instance

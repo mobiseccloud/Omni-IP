@@ -30,6 +30,8 @@ data class ConnectionTelemetry(
     val packageName: String,
     val appIcon: Drawable?,
     val protocol: String,
+    val sourcePort: Int,
+    val sourceIp: String,
     val destPort: Int,
     val destIp: String,
     val resolvedHostname: String?,

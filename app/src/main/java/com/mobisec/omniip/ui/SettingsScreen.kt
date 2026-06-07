@@ -250,6 +250,47 @@ fun SettingsScreen(onShowArchitectureDoc: () -> Unit = {}) {
         HorizontalDivider(color = TacticalAmber)
         Spacer(modifier = Modifier.height(24.dp))
 
+        Text("Live Telemetry Configuration", fontSize = 20.sp, color = MatrixGreen)
+        Spacer(modifier = Modifier.height(16.dp))
+
+        val sharedPrefs = context.getSharedPreferences("telemetry_prefs", Context.MODE_PRIVATE)
+        var inactiveInLimit by remember { mutableFloatStateOf(sharedPrefs.getInt("inactive_in_records_limit", 50).toFloat()) }
+        var inactiveOutLimit by remember { mutableFloatStateOf(sharedPrefs.getInt("inactive_out_records_limit", 50).toFloat()) }
+
+        Card(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Max Inactive Inbound Records: ${inactiveInLimit.toInt()}", fontSize = 16.sp)
+                Slider(
+                    value = inactiveInLimit,
+                    onValueChange = { inactiveInLimit = it },
+                    onValueChangeFinished = {
+                        sharedPrefs.edit().putInt("inactive_in_records_limit", inactiveInLimit.toInt()).apply()
+                    },
+                    valueRange = 0f..500f,
+                    steps = 49
+                )
+            }
+        }
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Max Inactive Outbound Records: ${inactiveOutLimit.toInt()}", fontSize = 16.sp)
+                Slider(
+                    value = inactiveOutLimit,
+                    onValueChange = { inactiveOutLimit = it },
+                    onValueChangeFinished = {
+                        sharedPrefs.edit().putInt("inactive_out_records_limit", inactiveOutLimit.toInt()).apply()
+                    },
+                    valueRange = 0f..500f,
+                    steps = 49
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+        HorizontalDivider(color = TacticalAmber)
+        Spacer(modifier = Modifier.height(24.dp))
+
         Text("Firewall Teardown Protection", fontSize = 20.sp, color = MatrixGreen)
         Spacer(modifier = Modifier.height(16.dp))
 
