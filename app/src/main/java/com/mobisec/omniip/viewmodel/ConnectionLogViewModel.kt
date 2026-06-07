@@ -20,6 +20,15 @@ class ConnectionLogViewModel(application: Application) : AndroidViewModel(applic
 
     private val _refreshTrigger = MutableStateFlow(0)
 
+    private val sharedPrefs = application.getSharedPreferences("telemetry_prefs", android.content.Context.MODE_PRIVATE)
+
+    val maxLogs = kotlinx.coroutines.flow.flow {
+        while (true) {
+            emit(sharedPrefs.getInt("connection_log_max_size", 1000))
+            kotlinx.coroutines.delay(2000)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 1000)
+
     val logs: StateFlow<List<ConnectionLog>> = kotlinx.coroutines.flow.combine(
         _selectedActions,
         _refreshTrigger
@@ -28,6 +37,10 @@ class ConnectionLogViewModel(application: Application) : AndroidViewModel(applic
             dao.getLogsByActions(actions.toList())
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val isLogPoolFull: StateFlow<Boolean> = kotlinx.coroutines.flow.combine(logs, maxLogs) { logsList, max ->
+        logsList.size >= max
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
     fun toggleActionFilter(action: String) {
         val current = _selectedActions.value.toMutableSet()

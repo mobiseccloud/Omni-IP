@@ -446,6 +446,11 @@ class OmniVpnService : VpnService() {
 
             if (baseAction == 0) {
                 return // Natively dropped
+            } else if (baseAction == 4) {
+                // ACTION_TARPIT: Pass directly to LwIP for starvation
+                packet.position(0)
+                com.mobisec.omniip.core.NativeEngine.passToLwip(packet, length)
+                return
             } else if (baseAction == 3) {
                 // SINKHOLE (Native DNS spoofing)
                 packet.position(0)
@@ -807,26 +812,22 @@ val targetIpString = targetIp.hostAddress ?: ""
                                 destPort = destPort,
                                 asn = asnName,
                                 countryCode = countryIsoCode,
+                                country = countryName,
                                 city = cityName,
                                 appName = appInfo.first,
                                 action = actionStr,
                                 protocol = if (protocol == 6) { "TCP" } else { "UDP" },
-                                sourceIp = sourceIp.hostAddress ?: "",
+                                sourceIp = sourceIp.hostAddress,
                                 sourcePort = sourcePort,
                                 domainName = hostname,
-                                country = countryName,
                                 direction = direction
                             )
                         )
-                        
-                        logTrimCounter++
-                        if (logTrimCounter % 50 == 0) {
-                            val prefs = getSharedPreferences("telemetry_prefs", android.content.Context.MODE_PRIVATE)
-                            val maxLogs = prefs.getInt("max_connection_logs", 500)
-                            logDao.trimLogs(maxLogs)
-                        }
-                    } catch(e: Exception) {
-                        e.printStackTrace()
+                        val sharedPrefs = getSharedPreferences("telemetry_prefs", android.content.Context.MODE_PRIVATE)
+                        val maxLogs = sharedPrefs.getInt("connection_log_max_size", 1000)
+                        logDao.trimLogs(maxLogs)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error logging connection", e)
                     }
                 }
             }
@@ -943,24 +944,20 @@ val targetIpString = targetIp.hostAddress ?: ""
                     destPort = 53,
                     asn = null,
                     countryCode = null,
+                    country = null,
                     city = null,
                     appName = "DNS SYSTEM",
                     action = "ERROR",
                     protocol = "UDP",
                     sourceIp = null,
                     sourcePort = null,
-                    domainName = null,
-                    country = null,
-                    direction = "OUTBOUND"
+                    domainName = errorMsg,
+                    direction = null
                 )
             )
-            
-            logTrimCounter++
-            if (logTrimCounter % 50 == 0) {
-                val prefs = getSharedPreferences("telemetry_prefs", android.content.Context.MODE_PRIVATE)
-                val maxLogs = prefs.getInt("max_connection_logs", 500)
-                logDao.trimLogs(maxLogs)
-            }
+            val sharedPrefs = getSharedPreferences("telemetry_prefs", android.content.Context.MODE_PRIVATE)
+            val maxLogs = sharedPrefs.getInt("connection_log_max_size", 1000)
+            logDao.trimLogs(maxLogs)
         } catch(e: Exception) {
             Log.e(TAG, "Failed to log DNS failure", e)
         }

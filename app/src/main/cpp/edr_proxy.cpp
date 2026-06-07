@@ -147,6 +147,7 @@ static err_t tcp_honeypot_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, 
     pbuf_free(p);
     
     // For starvation: we DO NOT send anything back. The app starves waiting for RX.
+    // As explicitly directed: "execute tcp_recved(tpcb, p->tot_len) and pbuf_free(p), but intentionally skip any relay logic"
     return ERR_OK;
 }
 
@@ -292,6 +293,13 @@ extern "C" void edr_proxy_start(int vpn_fd) {
     pthread_create(&g_proxy_thread, NULL, proxy_loop, NULL);
 }
 
-
-
-
+extern "C" void edr_proxy_input_packet(const uint8_t* data, size_t length) {
+    if (!g_proxy_running) return;
+    struct pbuf *p = pbuf_alloc(PBUF_RAW, length, PBUF_POOL);
+    if (p != NULL) {
+        pbuf_take(p, data, length);
+        if (g_vpn_netif.input(p, &g_vpn_netif) != ERR_OK) {
+            pbuf_free(p);
+        }
+    }
+}

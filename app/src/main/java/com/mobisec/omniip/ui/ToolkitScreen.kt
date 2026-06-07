@@ -21,6 +21,8 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -486,9 +488,21 @@ fun IpCalculatorScreen(viewModel: IpCalculatorViewModel = viewModel()) {
 fun ConnectionLogScreen(viewModel: ConnectionLogViewModel = viewModel()) {
     val logs by viewModel.logs.collectAsState()
     val selectedActions by viewModel.selectedActions.collectAsState()
+    val isLogPoolFull by viewModel.isLogPoolFull.collectAsState()
 
     Column(modifier = Modifier.fillMaxSize().background(PureBlack).padding(16.dp)) {
         Text("CONNECTION LOG MODULE", color = MatrixGreen, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+        
+        if (isLogPoolFull) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                "WARNING: Log pool is full (rolling). Oldest records are being overwritten. Clear logs or increase the Max Connection Logs setting.",
+                color = TacticalAmber,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        
         Spacer(modifier = Modifier.height(16.dp))
 
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
@@ -676,8 +690,9 @@ fun WifiScannerScreen(onRequirePremium: () -> Unit = {}) {
     var output by rememberSaveable { mutableStateOf("Ready to scan WiFi networks...") }
     val coroutineScope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
+    val scrollState = rememberScrollState()
 
-    Column(modifier = Modifier.fillMaxSize().background(PureBlack).padding(16.dp)) {
+    Column(modifier = Modifier.fillMaxSize().background(PureBlack).padding(16.dp).verticalScroll(scrollState)) {
         Text("WIFI SCANNER MODULE", color = MatrixGreen, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
         Spacer(modifier = Modifier.height(16.dp))
         Button(
@@ -710,7 +725,7 @@ fun WifiScannerScreen(onRequirePremium: () -> Unit = {}) {
             Text("Scan WiFi", color = PureBlack)
         }
         Spacer(modifier = Modifier.height(16.dp))
-        Text(output, color = MatrixGreen, fontSize = 14.sp, fontFamily = FontFamily.Monospace)
+        Text(output, color = MatrixGreen, fontSize = 14.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(bottom = 80.dp))
     }
 }
 

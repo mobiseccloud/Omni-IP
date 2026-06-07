@@ -822,18 +822,32 @@ Java_com_mobisec_omniip_core_NativeEngine_processPacketNative(
         }
     }
 
-    uint64_t rule_key = ((uint64_t)dest_ip << 16) | dest_port;
-
-    // Step 1 & 2: Lock-free atomic read of rule cache
+    uint64_t baseKey = (uint64_t)dest_ip & 0x3FFFFFFFFFFFULL;
+    uint64_t portBits = dest_port & 0xFFFFULL;
+    // Check TX rule (direction = 1)
+    uint64_t rule_key = (baseKey << 18) | (1ULL << 16) | portBits;
+    uint64_t wildcard_key = (baseKey << 18) | (1ULL << 16) | 0ULL;
+    
     std::shared_ptr<std::unordered_map<uint64_t, EnforcedRule>> current_rules = std::atomic_load(&g_active_rules);
     if (current_rules) {
-        auto it = current_rules->find(rule_key);
-        if (it != current_rules->end()) {
-            int action = it->second.tx_action;
-            if (action == 0) return 0; // DROP
-            if (action == 2) return 2; // FLAG
-            if (action == 1) return 1; // ALLOW (explicit allow overrides threat feed)
-        }
+        auto check_rule = [&](uint64_t key) -> int {
+            auto it = current_rules->find(key);
+            if (it != current_rules->end()) {
+                int tx_action = it->second.tx_action;
+                int rx_action = it->second.rx_action;
+                if (tx_action == 0) {
+                    if (rx_action == 0) return 4; // ACTION_TARPIT
+                    return 0; // DROP
+                }
+                if (tx_action == 2) return 2; // FLAG
+                if (tx_action == 1) return 1; // ALLOW
+            }
+            return -1;
+        };
+        int res = check_rule(rule_key);
+        if (res != -1) return res;
+        res = check_rule(wildcard_key);
+        if (res != -1) return res;
     }
 
     // Step 3: Check native threat Bloom filter
@@ -1121,4 +1135,21 @@ extern "C" __attribute__((visibility("default"))) JNIEXPORT void JNICALL
 Java_com_mobisec_omniip_core_NativeEngine_clearNativeRules(JNIEnv* env, jobject /* this */) {
     auto empty_rules = std::make_shared<std::unordered_map<uint64_t, EnforcedRule>>();
     std::atomic_store(&g_active_rules, empty_rules);
+}
+
+extern "C" void edr_proxy_start(int vpn_fd);
+extern "C" void edr_proxy_input_packet(const uint8_t* data, size_t length);
+
+extern "C" __attribute__((visibility("default"))) JNIEXPORT void JNICALL
+Java_com_mobisec_omniip_core_NativeEngine_startLwipProxy(JNIEnv* env, jobject /* this */, jint vpnFd) {
+    edr_proxy_start(vpnFd);
+}
+
+extern "C" __attribute__((visibility("default"))) JNIEXPORT void JNICALL
+Java_com_mobisec_omniip_core_NativeEngine_passToLwip(
+        JNIEnv* env, jobject /* this */, jobject packetBuffer, jint length) {
+    if (!packetBuffer) return;
+    void* bufferPtr = env->GetDirectBufferAddress(packetBuffer);
+    if (!bufferPtr) return;
+    edr_proxy_input_packet(static_cast<const uint8_t*>(bufferPtr), length);
 }

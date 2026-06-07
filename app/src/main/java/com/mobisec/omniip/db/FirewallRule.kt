@@ -23,5 +23,8 @@ data class FirewallRule(
     val blockWifi: Boolean = true,
     val blockMobile: Boolean = true,
     val direction: RuleDirection = RuleDirection.BOTH,
-    val interfaceRule: NetworkInterfaceRule = NetworkInterfaceRule.ALL
+    val interfaceRule: NetworkInterfaceRule = NetworkInterfaceRule.ALL,
+    val targetPort: Int = 0,
+    val txAction: Action = action,
+    val rxAction: Action = action
 )

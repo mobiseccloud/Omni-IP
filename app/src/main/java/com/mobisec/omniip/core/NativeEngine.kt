@@ -14,6 +14,7 @@ object NativeEngine {
     external fun executeSecuritySweep(context: android.content.Context)
     external fun processPacketNative(packetBuffer: java.nio.ByteBuffer, length: Int, pcapFd: Int): Int
     external fun startLwipProxy(vpnFd: Int)
+    external fun passToLwip(packetBuffer: java.nio.ByteBuffer, length: Int)
 
         var telemetryCallback: ((Int, String, Int, Int, Int, Int) -> Unit)? = null
     @JvmStatic fun onTelemetryEvent(sourcePort: Int, destIp: String, destPort: Int, protocol: Int, txBytes: Int, rxBytes: Int) {
@@ -30,6 +31,23 @@ object NativeEngine {
     external fun updateGeoRule(countryCode: String, action: String)
     external fun updateRulesBulk(keys: LongArray, txActions: ByteArray, rxActions: ByteArray)
 
+    private fun ipToLong(ipAddress: String): Long {
+        try {
+            val parts = ipAddress.split(".")
+            if (parts.size == 4) {
+                var num = 0L
+                for (i in 3 downTo 0) {
+                    val ip = parts[3 - i].toLong()
+                    num = num or (ip shl (i * 8))
+                }
+                return num
+            }
+        } catch (e: Exception) {
+            // Fallback
+        }
+        return 0L
+    }
+
     fun syncRulesToNative(rules: List<com.mobisec.omniip.db.FirewallRule>) {
         val size = rules.size
         val keys = LongArray(size)
@@ -40,24 +58,35 @@ object NativeEngine {
             val rule = rules[i]
             val targetStr = rule.targetValue
             
-            // Unified 64-bit hashing for all target types
-            keys[i] = HashUtils.murmurHash3(targetStr)
+            var baseKey: Long = when (rule.targetType) {
+                com.mobisec.omniip.db.TargetType.IP_ADDRESS -> ipToLong(targetStr)
+                com.mobisec.omniip.db.TargetType.APPLICATION -> targetStr.toLongOrNull() ?: 0L
+                else -> HashUtils.murmurHash3(targetStr)
+            }
+            
+            // Mask to 46 bits
+            baseKey = baseKey and 0x3FFFFFFFFFFFL
 
-            // Map symmetric actions (Legacy Support)
-            when (rule.action) {
-                com.mobisec.omniip.db.Action.BLOCK -> {
-                    txActions[i] = 0 // DROP
-                    rxActions[i] = 0 // DROP
-                }
-                com.mobisec.omniip.db.Action.IGNORE -> {
-                    txActions[i] = 1 // ALLOW
-                    rxActions[i] = 1 // ALLOW
-                }
-                com.mobisec.omniip.db.Action.FLAG -> {
-                    txActions[i] = 2 // FLAG
-                    rxActions[i] = 2 // FLAG
+            val directionBits = when (rule.direction) {
+                com.mobisec.omniip.model.RuleDirection.BOTH -> 0L
+                com.mobisec.omniip.model.RuleDirection.OUTBOUND -> 1L
+                com.mobisec.omniip.model.RuleDirection.INBOUND -> 2L
+            }
+
+            val portBits = rule.targetPort.toLong() and 0xFFFFL
+
+            keys[i] = (baseKey shl 18) or (directionBits shl 16) or portBits
+
+            fun mapAction(action: com.mobisec.omniip.db.Action): Byte {
+                return when (action) {
+                    com.mobisec.omniip.db.Action.BLOCK -> 0 // DROP / TARPIT (Tarpit applied natively on RX)
+                    com.mobisec.omniip.db.Action.IGNORE -> 1 // ALLOW
+                    com.mobisec.omniip.db.Action.FLAG -> 2 // FLAG
                 }
             }
+
+            txActions[i] = mapAction(rule.txAction)
+            rxActions[i] = mapAction(rule.rxAction)
         }
         
         updateRulesBulk(keys, txActions, rxActions)

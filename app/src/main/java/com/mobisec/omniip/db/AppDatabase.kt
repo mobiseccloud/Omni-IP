@@ -56,7 +56,18 @@ val MIGRATION_8_9 = object : Migration(8, 9) {
     }
 }
 
-@Database(entities = [FirewallRule::class, ThreatFeedRule::class, ConnectionLog::class, GeoRule::class, IntegrationEndpoint::class, HeuristicRule::class], version = 9, exportSchema = false)
+val MIGRATION_9_10 = object : Migration(9, 10) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        database.execSQL("ALTER TABLE `firewall_rules` ADD COLUMN `targetPort` INTEGER NOT NULL DEFAULT 0")
+        database.execSQL("ALTER TABLE `firewall_rules` ADD COLUMN `txAction` TEXT NOT NULL DEFAULT 'BLOCK'")
+        database.execSQL("ALTER TABLE `firewall_rules` ADD COLUMN `rxAction` TEXT NOT NULL DEFAULT 'BLOCK'")
+        
+        // Update the new columns to match the existing symmetric action to preserve functionality
+        database.execSQL("UPDATE `firewall_rules` SET `txAction` = `action`, `rxAction` = `action`")
+    }
+}
+
+@Database(entities = [FirewallRule::class, ThreatFeedRule::class, ConnectionLog::class, GeoRule::class, IntegrationEndpoint::class, HeuristicRule::class], version = 10, exportSchema = false)
 @TypeConverters(RoomConverters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun connectionLogDao(): ConnectionLogDao
@@ -76,7 +87,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "omni_ip_database"
                 )
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
                 .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE = instance

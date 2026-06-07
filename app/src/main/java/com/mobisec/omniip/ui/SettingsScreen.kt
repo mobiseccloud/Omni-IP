@@ -256,6 +256,22 @@ fun SettingsScreen(onShowArchitectureDoc: () -> Unit = {}) {
         val sharedPrefs = context.getSharedPreferences("telemetry_prefs", Context.MODE_PRIVATE)
         var inactiveInLimit by remember { mutableFloatStateOf(sharedPrefs.getInt("inactive_in_records_limit", 50).toFloat()) }
         var inactiveOutLimit by remember { mutableFloatStateOf(sharedPrefs.getInt("inactive_out_records_limit", 50).toFloat()) }
+        var connectionLogMax by remember { mutableFloatStateOf(sharedPrefs.getInt("connection_log_max_size", 1000).toFloat()) }
+
+        Card(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Max Connection Logs (Rolling Pool): ${connectionLogMax.toInt()}", fontSize = 16.sp)
+                Slider(
+                    value = connectionLogMax,
+                    onValueChange = { connectionLogMax = it },
+                    onValueChangeFinished = {
+                        sharedPrefs.edit().putInt("connection_log_max_size", connectionLogMax.toInt()).apply()
+                    },
+                    valueRange = 100f..5000f,
+                    steps = 48
+                )
+            }
+        }
 
         Card(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
             Column(modifier = Modifier.padding(16.dp)) {
