@@ -214,6 +214,9 @@ class OmniVpnService : VpnService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP_VPN) {
             isServiceRunning.value = false
+            vpnInterface?.close()
+            vpnInterface = null
+            vpnJob?.cancel()
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
             return START_NOT_STICKY
@@ -370,7 +373,7 @@ class OmniVpnService : VpnService() {
                 val cityDbFile = java.io.File(cacheDir, "GeoLite2-City.mmdb")
                 val asnDbFile = java.io.File(cacheDir, "GeoLite2-ASN.mmdb")
 
-                if (!cityDbFile.exists()) {
+                if (!cityDbFile.exists() || cityDbFile.length() < 1000) {
                     assets.open("GeoLite2-City.mmdb.gz").use { cityDbStream ->
                         java.util.zip.GZIPInputStream(cityDbStream).use { input ->
                             java.io.FileOutputStream(cityDbFile).use { output ->
@@ -380,7 +383,7 @@ class OmniVpnService : VpnService() {
                     }
                 }
 
-                if (!asnDbFile.exists()) {
+                if (!asnDbFile.exists() || asnDbFile.length() < 1000) {
                     assets.open("GeoLite2-ASN.mmdb.gz").use { asnDbStream ->
                         java.util.zip.GZIPInputStream(asnDbStream).use { input ->
                             java.io.FileOutputStream(asnDbFile).use { output ->
@@ -436,7 +439,7 @@ class OmniVpnService : VpnService() {
             if (length < 20) return // Min IPv4 header length
 
             // JNI Bridge parsing and firewall logic
-            val actionCode = com.mobisec.omniip.core.NativeEngine.processPacketNative(packet, length, activePcapWriter?.getFd() ?: -1)
+            val actionCode = com.mobisec.omniip.core.NativeEngine.processPacketNative(packet, length, -1)
 
             val baseAction = actionCode and 0xFF
             val newLength = actionCode shr 8
@@ -542,6 +545,7 @@ class OmniVpnService : VpnService() {
             packet.position(0) // Reset position for further processing
 
             activePcapWriter?.let {
+                it.writePacket(buffer, length)
                 pcapFileSizeFlow.value += length + 16 // 16 bytes for pcap packet header
             }
         }
@@ -632,7 +636,7 @@ val targetIpString = targetIp.hostAddress ?: ""
             var finalAction = Action.IGNORE // default allow if not in DB, mapped to ignore/allow
             var ruleApplied = false
 
-            val matchedGeo = geoRulesList.find { it.countryCode.equals(countryIsoCode, ignoreCase = true) && (it.city.isNullOrBlank() || it.city.equals(cityName, ignoreCase = true)) }
+            val matchedGeo = geoRulesList.find { (it.countryCode.equals(countryIsoCode, ignoreCase = true) || it.countryCode.equals(countryName, ignoreCase = true)) && (it.city.isNullOrBlank() || it.city.equals(cityName, ignoreCase = true)) }
             if (matchedGeo != null) {
                 if (matchedGeo.action == "BLOCK") {
                     finalAction = Action.BLOCK

@@ -91,6 +91,39 @@ fun DashboardScreen(
     
     // Busy indicator state for firewall toggle
     var isFirewallToggling by remember { mutableStateOf(false) }
+    var showExportPcapDialog by remember { mutableStateOf(false) }
+
+    if (showExportPcapDialog) {
+        val context = LocalContext.current
+        AlertDialog(
+            onDismissRequest = { showExportPcapDialog = false },
+            title = { Text("Export PCAP", color = MatrixGreen) },
+            text = { Text("The PCAP recording has been stopped. Would you like to export/save the capture.pcap file or delete it?", color = TextSecondary) },
+            confirmButton = {
+                TextButton(onClick = {
+                    val pcapFile = java.io.File(context.filesDir, "capture.pcap")
+                    if (pcapFile.exists()) {
+                        val uri = androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", pcapFile)
+                        val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                            type = "application/vnd.tcpdump.pcap"
+                            putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                            addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        }
+                        context.startActivity(android.content.Intent.createChooser(shareIntent, "Export PCAP"))
+                    }
+                    showExportPcapDialog = false
+                }) { Text("Export", color = MatrixGreen) }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    val pcapFile = java.io.File(context.filesDir, "capture.pcap")
+                    if (pcapFile.exists()) pcapFile.delete()
+                    showExportPcapDialog = false
+                }) { Text("Delete", color = AlertRed) }
+            },
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+        )
+    }
 
     LaunchedEffect(isFirewallActive) {
         isFirewallToggling = false
@@ -209,6 +242,7 @@ fun DashboardScreen(
                                 showAppSelectionSheet = true
                             } else {
                                 onToggleRecording(false, null)
+                                showExportPcapDialog = true
                             }
                         },
                         colors = SwitchDefaults.colors(
@@ -480,6 +514,8 @@ fun AddRuleDialog(
     var ruleTargetType by remember { mutableStateOf(initialType) }
     var useDomain by remember { mutableStateOf(initialType == com.mobisec.omniip.db.TargetType.DOMAIN) }
     var action by remember { mutableStateOf(com.mobisec.omniip.db.Action.BLOCK) }
+    var manualCountryCode by remember { mutableStateOf(initialCountryCode ?: "") }
+    var manualCityName by remember { mutableStateOf("") }
 
     val actualTargetType = if (ruleTargetType == com.mobisec.omniip.db.TargetType.IP_ADDRESS && useDomain) com.mobisec.omniip.db.TargetType.DOMAIN else ruleTargetType
 
@@ -543,20 +579,38 @@ fun AddRuleDialog(
                     }
                 }
 
-                OutlinedTextField(
-                    value = targetValue,
-                    onValueChange = {},
-                    label = { Text("Target") },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = false
-                )
+                if (actualTargetType == com.mobisec.omniip.db.TargetType.GEOLOCATION) {
+                    OutlinedTextField(
+                        value = manualCountryCode,
+                        onValueChange = { manualCountryCode = it },
+                        label = { Text("Country Name or Code (e.g. US)") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = manualCityName,
+                        onValueChange = { manualCityName = it },
+                        label = { Text("City (Optional)") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                } else {
+                    OutlinedTextField(
+                        value = targetValue,
+                        onValueChange = {},
+                        label = { Text("Target") },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = false
+                    )
+                }
             }
         },
         confirmButton = {
             Button(onClick = {
-                onAdd(actualTargetType, targetValue, action)
+                val finalTargetValue = if (actualTargetType == com.mobisec.omniip.db.TargetType.GEOLOCATION) {
+                    "$manualCountryCode|$manualCityName"
+                } else targetValue
+                onAdd(actualTargetType, finalTargetValue, action)
                 onDismiss()
-            }, enabled = targetValue.isNotBlank()) { Text("Add Rule") }
+            }, enabled = if (actualTargetType == com.mobisec.omniip.db.TargetType.GEOLOCATION) manualCountryCode.isNotBlank() else targetValue.isNotBlank()) { Text("Add Rule") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel", color = TextSecondary) }

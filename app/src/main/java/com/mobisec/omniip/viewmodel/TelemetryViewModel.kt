@@ -23,6 +23,7 @@ class TelemetryViewModel(application: Application) : AndroidViewModel(applicatio
 
     private val db = AppDatabase.getDatabase(application)
     private val dao = db.firewallRuleDao()
+    private val geoDao = db.geoRuleDao()
 
     private val connectionStateMap = mutableMapOf<Int, AppConnectionSummary>()
 
@@ -142,7 +143,19 @@ class TelemetryViewModel(application: Application) : AndroidViewModel(applicatio
 
     fun addRule(targetType: TargetType, targetValue: String, action: Action) {
         viewModelScope.launch(Dispatchers.IO) {
-            dao.insertRule(FirewallRule(targetType = targetType, targetValue = targetValue, action = action))
+            if (targetType == TargetType.GEOLOCATION) {
+                val parts = targetValue.split("|")
+                val countryCode = parts.getOrNull(0) ?: ""
+                val city = parts.getOrNull(1)?.takeIf { it.isNotBlank() }
+                geoDao.insertRule(com.mobisec.omniip.db.GeoRule(
+                    countryCode = countryCode,
+                    city = city,
+                    action = action.name,
+                    timestamp = System.currentTimeMillis()
+                ))
+            } else {
+                dao.insertRule(FirewallRule(targetType = targetType, targetValue = targetValue, action = action))
+            }
         }
     }
 }
