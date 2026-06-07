@@ -115,6 +115,11 @@ class OmniVpnService : VpnService() {
     class ExfiltrationMetrics(var txBytes: Long = 0L, var rxBytes: Long = 0L)
 
     companion object {
+        private const val NOTIFICATION_ID = 1
+        private const val CHANNEL_ID = "vpn_channel"
+        private const val BUFFER_SIZE = 32767
+        private const val PCAP_FILE_NAME = "capture.pcap"
+        private var logTrimCounter = 0
         private const val TAG = "OmniVpnService"
         const val ACTION_STOP_VPN = "com.mobisec.omniip.ACTION_STOP_VPN"
 
@@ -785,6 +790,13 @@ val targetIpString = targetIp.hostAddress ?: ""
                                 direction = direction
                             )
                         )
+                        
+                        logTrimCounter++
+                        if (logTrimCounter % 50 == 0) {
+                            val prefs = getSharedPreferences("telemetry_prefs", android.content.Context.MODE_PRIVATE)
+                            val maxLogs = prefs.getInt("max_connection_logs", 500)
+                            logDao.trimLogs(maxLogs)
+                        }
                     } catch(e: Exception) {
                         e.printStackTrace()
                     }
@@ -914,6 +926,13 @@ val targetIpString = targetIp.hostAddress ?: ""
                     direction = "OUTBOUND"
                 )
             )
+            
+            logTrimCounter++
+            if (logTrimCounter % 50 == 0) {
+                val prefs = getSharedPreferences("telemetry_prefs", android.content.Context.MODE_PRIVATE)
+                val maxLogs = prefs.getInt("max_connection_logs", 500)
+                logDao.trimLogs(maxLogs)
+            }
         } catch(e: Exception) {
             Log.e(TAG, "Failed to log DNS failure", e)
         }

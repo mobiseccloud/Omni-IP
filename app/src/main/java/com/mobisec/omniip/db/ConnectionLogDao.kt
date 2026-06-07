@@ -13,6 +13,9 @@ interface ConnectionLogDao {
     @Query("DELETE FROM connection_logs")
     suspend fun clearLogs()
 
+    @Query("DELETE FROM connection_logs WHERE id NOT IN (SELECT id FROM connection_logs ORDER BY timestamp DESC LIMIT :limit)")
+    suspend fun trimLogs(limit: Int)
+
     @Query("SELECT * FROM connection_logs ORDER BY timestamp DESC")
     fun getAllLogs(): Flow<List<ConnectionLog>>
 

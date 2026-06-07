@@ -85,6 +85,7 @@ fun LanScannerScreen(
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 80.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(devices) { device ->

@@ -529,6 +529,26 @@ fun ConnectionLogScreen(viewModel: ConnectionLogViewModel = viewModel()) {
         }
         Spacer(modifier = Modifier.height(16.dp))
 
+        val prefs = context.getSharedPreferences("telemetry_prefs", android.content.Context.MODE_PRIVATE)
+        val maxLogs = prefs.getInt("max_connection_logs", 500)
+
+        if (logs.size >= maxLogs) {
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+            ) {
+                Row(modifier = Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.onErrorContainer)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        "Log pool full ($maxLogs). Oldest records are being overwritten. Consider clearing logs or increasing size in Settings.",
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+        }
+
         LazyColumn(modifier = Modifier.fillMaxSize()) {
             items(logs) { log ->
                 val cardColor = when (log.action) {

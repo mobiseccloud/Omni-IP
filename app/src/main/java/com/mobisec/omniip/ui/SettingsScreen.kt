@@ -287,6 +287,24 @@ fun SettingsScreen(onShowArchitectureDoc: () -> Unit = {}) {
             }
         }
 
+        Spacer(modifier = Modifier.height(16.dp))
+
+        var maxLogsLimit by remember { mutableFloatStateOf(sharedPrefs.getInt("max_connection_logs", 500).toFloat()) }
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text("Connection Logs Buffer Limit: ${maxLogsLimit.toInt()}", fontSize = 16.sp)
+                Slider(
+                    value = maxLogsLimit,
+                    onValueChange = { maxLogsLimit = it },
+                    onValueChangeFinished = {
+                        sharedPrefs.edit().putInt("max_connection_logs", maxLogsLimit.toInt()).apply()
+                    },
+                    valueRange = 100f..5000f,
+                    steps = 48
+                )
+            }
+        }
+
         Spacer(modifier = Modifier.height(24.dp))
         HorizontalDivider(color = TacticalAmber)
         Spacer(modifier = Modifier.height(24.dp))
