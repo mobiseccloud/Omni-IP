@@ -970,11 +970,11 @@ val targetIpString = targetIp.hostAddress ?: ""
             connectivityManager.unregisterNetworkCallback(it)
         }
 
-        super.onDestroy()
-        vpnJob?.cancel()
-        scope.cancel()
         vpnInterface?.close()
         vpnInterface = null
+        vpnJob?.cancel()
+        scope.cancel()
+        super.onDestroy()
         try {
             cityDbReader?.close()
             asnDbReader?.close()
