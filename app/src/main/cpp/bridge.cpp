@@ -310,6 +310,9 @@ extern "C" void edr_emit_telemetry(int sourcePort, const char* destIp, int destP
     
     jstring jDestIp = env->NewStringUTF(destIp);
     env->CallStaticVoidMethod(g_telemetry_class, g_telemetry_method, sourcePort, jDestIp, destPort, protocol, txBytes, rxBytes);
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+    }
     env->DeleteLocalRef(jDestIp);
 }
 
@@ -675,7 +678,13 @@ extern "C" bool edr_protect_socket(int fd) {
     if (!g_jvm || !g_telemetry_class || !g_protect_method) return false;
     JNIEnv *env;
     if (g_jvm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) return false;
-    return env->CallStaticBooleanMethod(g_telemetry_class, g_protect_method, fd);
+    
+    bool result = env->CallStaticBooleanMethod(g_telemetry_class, g_protect_method, fd);
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        return true; // App is disallowed, so it is safe to proceed
+    }
+    return result;
 }
 
 extern "C" __attribute__ ((visibility ("default"))) JNIEXPORT void JNICALL
@@ -825,8 +834,11 @@ Java_com_mobisec_omniip_core_NativeEngine_processPacketNative(
     uint64_t baseKey = (uint64_t)dest_ip & 0x3FFFFFFFFFFFULL;
     uint64_t portBits = dest_port & 0xFFFFULL;
     // Check TX rule (direction = 1)
-    uint64_t rule_key = (baseKey << 18) | (1ULL << 16) | portBits;
-    uint64_t wildcard_key = (baseKey << 18) | (1ULL << 16) | 0ULL;
+    uint64_t rule_key_tx = (baseKey << 18) | (1ULL << 16) | portBits;
+    uint64_t wildcard_key_tx = (baseKey << 18) | (1ULL << 16) | 0ULL;
+    // Check BOTH rule (direction = 0)
+    uint64_t rule_key_both = (baseKey << 18) | (0ULL << 16) | portBits;
+    uint64_t wildcard_key_both = (baseKey << 18) | (0ULL << 16) | 0ULL;
     
     std::shared_ptr<std::unordered_map<uint64_t, EnforcedRule>> current_rules = std::atomic_load(&g_active_rules);
     if (current_rules) {
@@ -844,31 +856,18 @@ Java_com_mobisec_omniip_core_NativeEngine_processPacketNative(
             }
             return -1;
         };
-        int res = check_rule(rule_key);
+        int res = check_rule(rule_key_tx);
         if (res != -1) return res;
-        res = check_rule(wildcard_key);
+        res = check_rule(wildcard_key_tx);
+        if (res != -1) return res;
+        res = check_rule(rule_key_both);
+        if (res != -1) return res;
+        res = check_rule(wildcard_key_both);
         if (res != -1) return res;
     }
 
-    // Step 3: Check native threat Bloom filter
-    std::shared_lock<std::shared_mutex> bloom_lock(g_threat_bloom_mutex);
-    if (g_threat_bloom_array != nullptr && g_threat_bloom_len > 0) {
-        // Implement a simple hash check for the primitive IP
-        unsigned long hash = 5381;
-        hash = ((hash << 5) + hash) + (dest_ip & 0xFF);
-        hash = ((hash << 5) + hash) + ((dest_ip >> 8) & 0xFF);
-        hash = ((hash << 5) + hash) + ((dest_ip >> 16) & 0xFF);
-        hash = ((hash << 5) + hash) + ((dest_ip >> 24) & 0xFF);
-
-        int bit_index = hash % (g_threat_bloom_len * 64);
-        int long_index = bit_index / 64;
-        int bit_offset = bit_index % 64;
-
-        if ((g_threat_bloom_array[long_index] & (1ULL << bit_offset)) != 0) {
-            return 0; // DROP
-        }
-    }
-    bloom_lock.unlock();
+    // Step 3: Check native threat Bloom filter (REMOVED - Handled by Kotlin)
+    // The previous implementation was mathematically flawed and dropped almost all traffic due to false positives.
 
     // Step 4: Integrate verification checks (Unauthorized deep scan pattern)
     if (protocol == 6 || protocol == 17) { // TCP or UDP
@@ -1152,4 +1151,27 @@ Java_com_mobisec_omniip_core_NativeEngine_passToLwip(
     void* bufferPtr = env->GetDirectBufferAddress(packetBuffer);
     if (!bufferPtr) return;
     edr_proxy_input_packet(static_cast<const uint8_t*>(bufferPtr), length);
+}
+extern "C" void edr_proxy_kill_tcp(uint32_t src_ip, uint32_t dst_ip, uint16_t src_port, uint16_t dst_port);
+
+extern "C" __attribute__((visibility("default"))) JNIEXPORT void JNICALL
+Java_com_mobisec_omniip_core_NativeEngine_killTcpSession(
+        JNIEnv* env, jobject /* this */, jbyteArray sourceIp, jbyteArray destIp, jint sourcePort, jint destPort) {
+    if (!sourceIp || !destIp) return;
+    
+    jbyte* src = env->GetByteArrayElements(sourceIp, nullptr);
+    jbyte* dst = env->GetByteArrayElements(destIp, nullptr);
+    
+    uint32_t s_ip = 0, d_ip = 0;
+    if (env->GetArrayLength(sourceIp) >= 4) {
+        std::memcpy(&s_ip, src, 4);
+    }
+    if (env->GetArrayLength(destIp) >= 4) {
+        std::memcpy(&d_ip, dst, 4);
+    }
+    
+    env->ReleaseByteArrayElements(sourceIp, src, JNI_ABORT);
+    env->ReleaseByteArrayElements(destIp, dst, JNI_ABORT);
+    
+    edr_proxy_kill_tcp(s_ip, d_ip, (uint16_t)sourcePort, (uint16_t)destPort);
 }

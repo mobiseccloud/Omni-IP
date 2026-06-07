@@ -18,7 +18,8 @@ data class ConnectionDetails(
     var lastActive: Long = System.currentTimeMillis(),
     val countryCode: String? = null,
     val country: String? = null,
-    val city: String? = null
+    val city: String? = null,
+    val asn: String? = null
 )
 
 data class AppConnectionSummary(

@@ -67,19 +67,12 @@ class OmniVpnService : VpnService() {
     private var vpnJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    private val dnsCache = CacheBuilder.newBuilder()
-        .expireAfterAccess(2, java.util.concurrent.TimeUnit.HOURS)
-        .maximumSize(5000)
-        .build<String, String>() // IP -> Hostname
     private val ruleCache = CacheBuilder.newBuilder()
         .expireAfterAccess(2, java.util.concurrent.TimeUnit.HOURS)
         .maximumSize(5000)
         .build<String, Action>()
     private var threatBloomFilter: BloomFilter<CharSequence>? = null
     private var threatFeedsLastUpdated: Long = 0
-
-    private var cityDbReader: DatabaseReader? = null
-    private var asnDbReader: DatabaseReader? = null
 
     // Behavioral Heuristics token buckets
     private val uidTokenBuckets = CacheBuilder.newBuilder()
@@ -89,7 +82,41 @@ class OmniVpnService : VpnService() {
     private val MAX_REQUESTS_PER_HOUR = 100 // Default configurable threshold
 
     private val httpClient: OkHttpClient by lazy {
-        OkHttpClient.Builder().build()
+        OkHttpClient.Builder()
+            .socketFactory(object : javax.net.SocketFactory() {
+                private val defaultFactory = javax.net.SocketFactory.getDefault()
+                
+                override fun createSocket(): java.net.Socket {
+                    val socket = defaultFactory.createSocket()
+                    this@OmniVpnService.protect(socket)
+                    return socket
+                }
+
+                override fun createSocket(host: String, port: Int): java.net.Socket {
+                    val socket = defaultFactory.createSocket(host, port)
+                    this@OmniVpnService.protect(socket)
+                    return socket
+                }
+
+                override fun createSocket(host: String, port: Int, localHost: InetAddress, localPort: Int): java.net.Socket {
+                    val socket = defaultFactory.createSocket(host, port, localHost, localPort)
+                    this@OmniVpnService.protect(socket)
+                    return socket
+                }
+
+                override fun createSocket(host: InetAddress, port: Int): java.net.Socket {
+                    val socket = defaultFactory.createSocket(host, port)
+                    this@OmniVpnService.protect(socket)
+                    return socket
+                }
+
+                override fun createSocket(address: InetAddress, port: Int, localAddress: InetAddress, localPort: Int): java.net.Socket {
+                    val socket = defaultFactory.createSocket(address, port, localAddress, localPort)
+                    this@OmniVpnService.protect(socket)
+                    return socket
+                }
+            })
+            .build()
     }
 
     class TokenBucket(val capacity: Int, val refillRateMs: Long) {
@@ -123,6 +150,34 @@ class OmniVpnService : VpnService() {
         private const val TAG = "OmniVpnService"
         const val ACTION_STOP_VPN = "com.mobisec.omniip.ACTION_STOP_VPN"
 
+        // GeoLite2 Integration
+        var cityDbReader: com.maxmind.geoip2.DatabaseReader? = null
+        var asnDbReader: com.maxmind.geoip2.DatabaseReader? = null
+
+        fun resolveGeoInfo(ipStr: String): Pair<String?, String?> {
+            try {
+                val ip = java.net.InetAddress.getByName(ipStr)
+                if (ip.isSiteLocalAddress || ip.isLoopbackAddress) return Pair(null, null)
+                cityDbReader?.let { reader ->
+                    val response = reader.city(ip)
+                    return Pair(response.country.isoCode, response.city.name)
+                }
+            } catch (e: Exception) { }
+            return Pair(null, null)
+        }
+
+        fun resolveAsnInfo(ipStr: String): String? {
+            try {
+                val ip = java.net.InetAddress.getByName(ipStr)
+                if (ip.isSiteLocalAddress || ip.isLoopbackAddress) return null
+                asnDbReader?.let { reader ->
+                    val response = reader.asn(ip)
+                    return response.autonomousSystemOrganization
+                }
+            } catch (e: Exception) { }
+            return null
+        }
+
         // Pcap Integration
         @Volatile var activePcapWriter: PcapWriter? = null
         var pcapFileSizeFlow = kotlinx.coroutines.flow.MutableStateFlow(0L)
@@ -150,6 +205,24 @@ class OmniVpnService : VpnService() {
         private val _telemetryFlow = MutableSharedFlow<ConnectionTelemetry>(extraBufferCapacity = 100)
         val telemetryFlow = _telemetryFlow.asSharedFlow()
         private const val ONGOING_NOTIFICATION_ID = 1111
+
+        // Fast-Path Hash Map
+        val fastPathStateMap = java.util.concurrent.ConcurrentHashMap<Long, Boolean>() // true = ALLOW, false = BLOCK
+        
+        // Slow-Path Telemetry Queue
+        class RawConnectionData(
+            val hash: Long,
+            val protocol: Int,
+            val sourceIp: InetAddress,
+            val destIp: InetAddress,
+            val sourcePort: Int,
+            val destPort: Int,
+            val direction: String?
+        )
+        val telemetryQueue = kotlinx.coroutines.channels.Channel<RawConnectionData>(
+            capacity = 1000,
+            onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST
+        )
     }
 
     override fun onCreate() {
@@ -223,12 +296,17 @@ class OmniVpnService : VpnService() {
         }
         
         if (intent?.action == "START_PCAP") {
+            val targetUidExtra = intent.getIntExtra("targetUid", -1)
+            targetRecordUid = if (targetUidExtra != -1) targetUidExtra else null
+
             kotlinx.coroutines.GlobalScope.launch {
                 try {
                     val file = java.io.File(filesDir, PCAP_FILE_NAME)
+                    // Start background telemetry consumer
+                    startTelemetryWorker()
                     val pfd = android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_WRITE or android.os.ParcelFileDescriptor.MODE_CREATE or android.os.ParcelFileDescriptor.MODE_TRUNCATE)
                     val writer = PcapWriter(pfd)
-                    writer.initialize()
+                    writer.initialize(this)
                     activePcapWriter = writer
                     isPcapRecordingFlow.value = true
                     pcapFileSizeFlow.value = 24L // global header
@@ -250,18 +328,157 @@ class OmniVpnService : VpnService() {
 
         if (vpnInterface != null) return START_STICKY
 
-        val builder = Builder()
-            .addAddress("10.0.0.2", 24)
-            .addRoute("0.0.0.0", 0)
-            .addAddress("fd00:1:fd00:1:fd00:1:fd00:1", 128)
-            .addRoute("::", 0)
-            .addDisallowedApplication(packageName)
-            .setSession("Omni-IP Telemetry Engine")
-            .setMtu(1500)
+        try {
+            val builder = Builder()
+                .addAddress("10.0.0.2", 24)
+                .addRoute("0.0.0.0", 0)
+                .addAddress("fd00:1:fd00:1:fd00:1:fd00:1", 128)
+                .addRoute("::", 0)
+                .addDisallowedApplication(packageName)
+                .setSession("Omni-IP Telemetry Engine")
+                .setMtu(1500)
 
-        vpnInterface = builder.establish()
+            vpnInterface = builder.establish()
+            if (vpnInterface == null) {
+                android.util.Log.w(TAG, "VPN preparation not granted. Shutting down service.")
+                isServiceRunning.value = false
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+                return START_NOT_STICKY
+            }
+        } catch (e: SecurityException) {
+            android.util.Log.e(TAG, "SecurityException establishing VPN. Permission revoked?", e)
+            isServiceRunning.value = false
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return START_NOT_STICKY
+        } catch (e: IllegalArgumentException) {
+            android.util.Log.e(TAG, "IllegalArgumentException establishing VPN. Invalid Builder config.", e)
+            isServiceRunning.value = false
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return START_NOT_STICKY
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "Exception establishing VPN: ${e.message}", e)
+            isServiceRunning.value = false
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return START_NOT_STICKY
+        }
 
         vpnInterface?.let {
+            com.mobisec.omniip.core.NativeEngine.socketProtector = { fd -> 
+                var success = false
+                try {
+                    success = this@OmniVpnService.protect(fd)
+                } catch (e: Exception) {
+                    android.util.Log.w(TAG, "VpnService.protect() threw Exception: ${e.message}")
+                }
+                
+                if (!success) {
+                    android.util.Log.w(TAG, "VpnService.protect() failed for fd $fd. Attempting physical network fallback.")
+                    try {
+                        val cm = getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+                        val activeNetwork = cm.activeNetwork
+                        if (activeNetwork != null) {
+                            val pfd = android.os.ParcelFileDescriptor.adoptFd(fd)
+                            activeNetwork.bindSocket(pfd.fileDescriptor)
+                            pfd.detachFd()
+                            success = true
+                            android.util.Log.i(TAG, "Successfully bound fd $fd to physical network.")
+                        } else {
+                            android.util.Log.e(TAG, "No active physical network available for fallback.")
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e(TAG, "Fallback bindSocket failed", e)
+                    }
+                }
+                success
+            }
+            
+            com.mobisec.omniip.core.NativeEngine.telemetryCallback = { sourcePort, destIp, destPort, protocol, txBytes, rxBytes ->
+                scope.launch {
+                    val uid = try {
+                        if (protocol == 6 || protocol == 17) {
+                            val localAddr = java.net.InetSocketAddress(java.net.InetAddress.getByName("10.0.0.2"), sourcePort)
+                            val remoteAddr = java.net.InetSocketAddress(java.net.InetAddress.getByName(destIp), destPort)
+                            val connectivityManager = getSystemService(android.content.Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+                            connectivityManager.getConnectionOwnerUid(protocol, localAddr, remoteAddr)
+                        } else {
+                            -1
+                        }
+                    } catch (e: Exception) {
+                        -1
+                    }
+                    
+                    val appInfo = getAppInfo(uid)
+                    var hostname = com.mobisec.omniip.core.DnsResolver.get(destIp)
+                    
+                    val direction = if (txBytes > 0) ConnectionDirection.OUTBOUND_STR else ConnectionDirection.INBOUND_STR
+                    
+                    val telemetry = ConnectionTelemetry(
+                        appName = appInfo.first,
+                        packageName = appInfo.second,
+                        appIcon = appInfo.third,
+                        protocol = com.mobisec.omniip.core.ProtocolMapper.getName(protocol),
+                        sourceIp = destIp,
+                        sourcePort = sourcePort,
+                        destPort = destPort,
+                        destIp = "10.0.0.2",
+                        resolvedHostname = hostname,
+                        country = null,
+                        countryCode = null,
+                        city = null,
+                        asn = null,
+                        direction = direction,
+                        uid = uid,
+                        isBlocked = false,
+                        isFlagged = false,
+                        isIgnored = false
+                    )
+                    _telemetryFlow.tryEmit(telemetry)
+
+                    // Log INBOUND or unhandled protocols (like ICMP) to ConnectionLogDao 
+                    // if handleGenericPacket missed them (uid == -1 or inbound).
+                    val sessionKey = "${uid}:${destIp}:${destPort}"
+                    if (sessionLogCache.getIfPresent(sessionKey) == null) {
+                        sessionLogCache.put(sessionKey, true)
+                        try {
+                            val geo = resolveGeoInfo(destIp)
+                            val asyncCountryCode = geo.first
+                            val asyncCityName = geo.second
+                            val asyncAsnName = resolveAsnInfo(destIp)
+
+                            val db = AppDatabase.getDatabase(this@OmniVpnService)
+                            val logDao = db.connectionLogDao()
+                            logDao.insertLog(
+                                ConnectionLog(
+                                    destIp = if (direction == ConnectionDirection.OUTBOUND_STR) destIp else "10.0.0.2",
+                                    destPort = destPort,
+                                    asn = asyncAsnName,
+                                    countryCode = asyncCountryCode,
+                                    country = null, 
+                                    city = asyncCityName,
+                                    appName = appInfo.first,
+                                    action = "ALLOW",
+                                    protocol = com.mobisec.omniip.core.ProtocolMapper.getName(protocol),
+                                    sourceIp = if (direction == ConnectionDirection.OUTBOUND_STR) "10.0.0.2" else destIp,
+                                    sourcePort = sourcePort,
+                                    domainName = hostname,
+                                    direction = direction
+                                )
+                            )
+                            val sharedPrefs = getSharedPreferences("telemetry_prefs", android.content.Context.MODE_PRIVATE)
+                            val maxLogs = sharedPrefs.getInt("connection_log_max_size", 1000)
+                            logDao.trimLogs(maxLogs)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error logging connection from telemetry", e)
+                        }
+                    }
+                }
+            }
+
+            com.mobisec.omniip.core.NativeEngine.startLwipProxy(it.fd)
             vpnJob = scope.launch {
                 initGeoIp()
                 loadBloomFilter()
@@ -326,11 +543,18 @@ class OmniVpnService : VpnService() {
     private suspend fun loadBloomFilter() {
         withContext(Dispatchers.IO) {
             try {
-                val file = File(filesDir, "threat_bloom.bin")
+                val file = java.io.File(filesDir, "threat_bloom.bin")
                 if (file.exists()) {
-                    FileInputStream(file).use { fis ->
-                        threatBloomFilter = BloomFilter.readFrom(fis, Funnels.stringFunnel(Charsets.UTF_8))
-                        threatFeedsLastUpdated = file.lastModified()
+                    try {
+                        java.io.FileInputStream(file).use { input ->
+                            val filter = com.google.common.hash.BloomFilter.readFrom(
+                                input,
+                                com.google.common.hash.Funnels.stringFunnel(Charsets.UTF_8)
+                            )
+                            threatBloomFilter = filter
+                        }
+                    } catch (e: Exception) {
+                        android.util.Log.e("OmniVpnService", "Error loading Bloom Filter", e)
                     }
                     Log.d(TAG, "Loaded Threat Feed Bloom Filter successfully")
 
@@ -373,33 +597,123 @@ class OmniVpnService : VpnService() {
                 val cityDbFile = java.io.File(cacheDir, "GeoLite2-City.mmdb")
                 val asnDbFile = java.io.File(cacheDir, "GeoLite2-ASN.mmdb")
 
-                if (!cityDbFile.exists() || cityDbFile.length() < 1000) {
-                    assets.open("GeoLite2-City.mmdb.gz").use { cityDbStream ->
-                        java.util.zip.GZIPInputStream(cityDbStream).use { input ->
+                try {
+                    if (!cityDbFile.exists() || cityDbFile.length() < 1000) {
+                        assets.open("GeoLite2-City.mmdb").use { input ->
                             java.io.FileOutputStream(cityDbFile).use { output ->
                                 input.copyTo(output)
                             }
                         }
                     }
+                } catch (e: Exception) {
+                    android.util.Log.e("OmniVpnService", "Failed to extract GeoLite2-City database", e)
                 }
 
-                if (!asnDbFile.exists() || asnDbFile.length() < 1000) {
-                    assets.open("GeoLite2-ASN.mmdb.gz").use { asnDbStream ->
-                        java.util.zip.GZIPInputStream(asnDbStream).use { input ->
+                try {
+                    if (!asnDbFile.exists() || asnDbFile.length() < 1000) {
+                        assets.open("GeoLite2-ASN.mmdb").use { input ->
                             java.io.FileOutputStream(asnDbFile).use { output ->
                                 input.copyTo(output)
                             }
                         }
                     }
+                } catch (e: Exception) {
+                    android.util.Log.e("OmniVpnService", "Failed to extract GeoLite2-ASN database", e)
                 }
 
-                cityDbReader = DatabaseReader.Builder(cityDbFile).fileMode(com.maxmind.db.Reader.FileMode.MEMORY_MAPPED).build()
-                asnDbReader = DatabaseReader.Builder(asnDbFile).fileMode(com.maxmind.db.Reader.FileMode.MEMORY_MAPPED).build()
+                if (cityDbFile.exists() && cityDbFile.length() > 1000) {
+                    cityDbReader = DatabaseReader.Builder(cityDbFile).fileMode(com.maxmind.db.Reader.FileMode.MEMORY_MAPPED).build()
+                }
+                if (asnDbFile.exists() && asnDbFile.length() > 1000) {
+                    asnDbReader = DatabaseReader.Builder(asnDbFile).fileMode(com.maxmind.db.Reader.FileMode.MEMORY_MAPPED).build()
+                }
 
             } catch (e: java.net.UnknownHostException) {
                 Log.e(TAG, "Failed to initialize GeoIP databases: UnknownHostException", e)
             } catch (e: java.io.IOException) {
                 Log.e(TAG, "Failed to initialize GeoIP databases: IOException", e)
+            }
+            Unit
+        }
+    }
+
+    private fun startTelemetryWorker() {
+        scope.launch(Dispatchers.IO) {
+            for (data in telemetryQueue) {
+                try {
+                    val uid = resolveUid(data.protocol, data.sourceIp, data.sourcePort, data.destIp, data.destPort)
+                    val appInfo = getAppInfo(uid)
+                    var hostname = data.destIp.hostAddress?.let { com.mobisec.omniip.core.DnsResolver.get(it) }
+
+                    // Heavy logic: Rule evaluation
+                    var targetIpString = (if (data.direction == ConnectionDirection.INBOUND_STR) data.sourceIp else data.destIp).hostAddress ?: ""
+                    var isBlocked = false
+                    
+                    val db = AppDatabase.getDatabase(this@OmniVpnService)
+                    val geoRulesList = db.geoRuleDao().getAllRulesSync()
+                    
+                    val geo = resolveGeoInfo(targetIpString)
+                    val asyncCountryCode = geo.first
+                    val asyncCityName = geo.second
+                    val asyncAsnName = resolveAsnInfo(targetIpString)
+                    
+                    val matchedGeoAsync = geoRulesList.find { 
+                        it.countryCode.equals(asyncCountryCode, ignoreCase = true) && 
+                        (it.city.isNullOrBlank() || it.city.equals(asyncCityName, ignoreCase = true)) 
+                    }
+                    if (matchedGeoAsync != null && matchedGeoAsync.action == "BLOCK") {
+                        isBlocked = true
+                        val fwDao = db.firewallRuleDao()
+                        fwDao.insertRule(com.mobisec.omniip.db.FirewallRule(
+                            targetType = com.mobisec.omniip.db.TargetType.IP_ADDRESS,
+                            targetValue = targetIpString,
+                            action = com.mobisec.omniip.db.Action.BLOCK,
+                            timestamp = System.currentTimeMillis()
+                        ))
+                        val rules = fwDao.getAllRulesSync()
+                        com.mobisec.omniip.core.NativeEngine.syncRulesToNative(rules)
+                    }
+
+                    // Update Fast-Path map
+                    fastPathStateMap[data.hash] = !isBlocked
+
+                    // If it was retroactively blocked, teardown
+                    if (isBlocked && data.protocol == 6) {
+                        // For TCP, trigger retroactive teardown via JNI
+                        com.mobisec.omniip.core.NativeEngine.killTcpSession(
+                            data.sourceIp.address,
+                            data.destIp.address,
+                            data.sourcePort,
+                            data.destPort
+                        )
+                    }
+
+                    // Log telemetry
+                    val sessionKey = "${uid}:${data.destIp.hostAddress}:${data.destPort}"
+                    if (sessionLogCache.getIfPresent(sessionKey) == null) {
+                        sessionLogCache.put(sessionKey, true)
+                        val logDao = db.connectionLogDao()
+                        logDao.insertLog(
+                            ConnectionLog(
+                                destIp = targetIpString,
+                                destPort = data.destPort,
+                                asn = asyncAsnName,
+                                countryCode = asyncCountryCode,
+                                country = null, 
+                                city = asyncCityName,
+                                appName = appInfo.first,
+                                action = if (isBlocked) "BLOCK" else "ALLOW",
+                                protocol = com.mobisec.omniip.core.ProtocolMapper.getName(data.protocol),
+                                sourceIp = data.sourceIp.hostAddress,
+                                sourcePort = data.sourcePort,
+                                domainName = hostname,
+                                direction = data.direction
+                            )
+                        )
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error in telemetry worker", e)
+                }
             }
         }
     }
@@ -418,8 +732,14 @@ class OmniVpnService : VpnService() {
                     processPacket(buffer, length, outputStream)
                 }
             } catch (e: Exception) {
-                if (e.message?.contains("EBADF") == true) break
-                Log.e(TAG, "Error reading packet", e)
+                if (e.message?.contains("EBADF") == true) {
+                    android.util.Log.w(TAG, "VPN Interface closed (EBADF). Shutting down service.")
+                    isServiceRunning.value = false
+                    stopForeground(STOP_FOREGROUND_REMOVE)
+                    stopSelf()
+                    break
+                }
+                android.util.Log.e(TAG, "Error reading packet", e)
             }
         }
     }
@@ -447,9 +767,7 @@ class OmniVpnService : VpnService() {
             if (baseAction == 0) {
                 return // Natively dropped
             } else if (baseAction == 4) {
-                // ACTION_TARPIT: Pass directly to LwIP for starvation
-                packet.position(0)
-                com.mobisec.omniip.core.NativeEngine.passToLwip(packet, length)
+                // ACTION_TARPIT: Silent Drop without TCP RST
                 return
             } else if (baseAction == 3) {
                 // SINKHOLE (Native DNS spoofing)
@@ -529,59 +847,59 @@ class OmniVpnService : VpnService() {
             destPort = PacketUtils.getDestPort(packet, ihl)
         }
 
-        val uid = resolveUid(protocol, sourceIp, sourcePort, destIp, destPort)
+        // ==========================================
+        // FAST-PATH: O(1) State Evaluation
+        // ==========================================
+        // Generate Bitwise XOR Hash for the 5-tuple
+        val srcHash = (sourceIp.hashCode().toLong() and 0xFFFFFFFFL)
+        val dstHash = (destIp.hashCode().toLong() and 0xFFFFFFFFL)
+        var connectionHash = srcHash xor dstHash
+        connectionHash = (connectionHash shl 16) xor sourcePort.toLong()
+        connectionHash = (connectionHash shl 16) xor destPort.toLong()
+        connectionHash = (connectionHash shl 8) xor protocol.toLong()
+        
+        // Fast-path lookup
+        val isAllowed = fastPathStateMap[connectionHash]
 
-        // Exfiltration Accounting
-        if (uid != -1 && uid != -2) {
-            val metrics = exfiltrationTracker.get(uid) { ExfiltrationMetrics() }
-            if (sourceIp.hostAddress == "10.0.0.2") {
-                metrics.txBytes += length // Outbound
-            } else if (destIp.hostAddress == "10.0.0.2") {
-                metrics.rxBytes += length // Inbound
-            }
+        if (isAllowed == false) {
+            // Connection is definitively BLOCKED by Slow-Path Worker
+            return
         }
 
-        // Targeted PCAP Filtering
-        val targetUid = targetRecordUid
-        if (targetUid == null || targetUid == uid) {
-            // Extract packet to write to PCAP
-            packet.position(0)
-            packet.get(buffer, 0, length)
-            packet.position(0) // Reset position for further processing
-
-            activePcapWriter?.let {
-                it.writePacket(buffer, length)
-                pcapFileSizeFlow.value += length + 16 // 16 bytes for pcap packet header
-            }
-        }
-
-        var shouldDrop = false
-
-        if (protocol == 17) { // UDP
-            if (destPort == 53) {
-                handleDnsRequest(packet, length, ihl, sourceIp, destIp, sourcePort, outputStream, uid)
-                shouldDrop = true // DNS is handled/forwarded, don't write generic packet
-            } else {
-                shouldDrop = handleGenericPacket(protocol, sourceIp, destIp, sourcePort, destPort, null, packet, length, uid)
-            }
-        } else if (protocol == 6) { // TCP
+        if (isAllowed == null) {
+            // Connection is UNKNOWN. 
+            // 1. Fail-Open (allow packet through)
+            // 2. Push to Slow-Path Queue for resolution
+            
             var direction: String? = null
-            if (PacketUtils.isTcpSyn(packet, ihl)) {
-                if (sourceIp.hostAddress == "10.0.0.2") {
-                    direction = ConnectionDirection.OUTBOUND_STR
-                } else if (destIp.hostAddress == "10.0.0.2") {
-                    direction = ConnectionDirection.INBOUND_STR
-                }
+            if (protocol == 6 && PacketUtils.isTcpSyn(packet, ihl)) {
+                direction = if (sourceIp.hostAddress == "10.0.0.2") ConnectionDirection.OUTBOUND_STR else ConnectionDirection.INBOUND_STR
             }
-
-            shouldDrop = handleGenericPacket(protocol, sourceIp, destIp, sourcePort, destPort, direction, packet, length, uid)
+            
+            val rawData = RawConnectionData(
+                hash = connectionHash,
+                protocol = protocol,
+                sourceIp = sourceIp,
+                destIp = destIp,
+                sourcePort = sourcePort,
+                destPort = destPort,
+                direction = direction
+            )
+            telemetryQueue.trySend(rawData)
+            
+            // Optimistically set to ALLOW to prevent re-queueing every packet while worker is processing
+            fastPathStateMap[connectionHash] = true
         }
 
-        if (!shouldDrop) {
-            packet.position(0)
-            packet.get(buffer, 0, length)
-            outputStream.write(buffer, 0, length)
+        // DNS interception bypasses generic queue
+        if (protocol == 17 && destPort == 53) {
+            handleDnsRequest(packet, length, ihl, sourceIp, destIp, sourcePort, outputStream, -1)
+            return
         }
+
+        // Pass to proxy
+        packet.position(0)
+        com.mobisec.omniip.core.NativeEngine.passToLwip(packet, length)
 
         } finally {
             bufferPool.offer(buffer)
@@ -591,7 +909,7 @@ class OmniVpnService : VpnService() {
     private suspend fun handleGenericPacket(protocol: Int, sourceIp: InetAddress, destIp: InetAddress, sourcePort: Int, destPort: Int, direction: String?, packet: ByteBuffer, length: Int, uid: Int): Boolean {
         if (uid != -1) {
             val appInfo = getAppInfo(uid)
-            var hostname = destIp.hostAddress?.let { dnsCache.getIfPresent(it) }
+            var hostname = destIp.hostAddress?.let { com.mobisec.omniip.core.DnsResolver.get(it) }
 
             // Extract SNI domain from TCP port 443 packets
             if (protocol == 6 && destPort == 443) {
@@ -602,54 +920,13 @@ class OmniVpnService : VpnService() {
                 }
             }
 
-            var countryName: String? = null
-            var countryIsoCode: String? = null
-            var cityName: String? = null
-            var asnName: String? = null
-
             val targetIp = if (direction == ConnectionDirection.INBOUND_STR) { sourceIp } else { destIp }
-
-            try {
-                if (!targetIp.isSiteLocalAddress && !targetIp.isLoopbackAddress) {
-                    cityDbReader?.let { reader ->
-                        val response = reader.city(targetIp)
-                        countryName = response.country.name
-                        countryIsoCode = response.country.isoCode
-                        cityName = response.city.name
-                    }
-                    asnDbReader?.let { reader ->
-                        val response = reader.asn(targetIp)
-                        val num = response.autonomousSystemNumber
-                        val org = response.autonomousSystemOrganization
-                        if (num != null) {
-                            val orgStr = if (org != null) " $org" else ""
-                            asnName = "AS$num$orgStr"
-                        }
-                    }
-                }
-            } catch (e: com.maxmind.geoip2.exception.AddressNotFoundException) {
-                // Ignore expected missing address exceptions
-            } catch (e: java.net.UnknownHostException) {
-                Log.e(TAG, "UnknownHostException resolving GeoIP for target: $targetIp", e)
-                countryName = "GeoIP Error"
-            } catch (e: java.io.IOException) {
-                Log.e(TAG, "IOException resolving GeoIP for target: $targetIp", e)
-                countryName = "GeoIP Error"
-            }
-
-val targetIpString = targetIp.hostAddress ?: ""
+            val targetIpString = targetIp.hostAddress ?: ""
             var finalAction = Action.IGNORE // default allow if not in DB, mapped to ignore/allow
             var ruleApplied = false
 
-            val matchedGeo = geoRulesList.find { (it.countryCode.equals(countryIsoCode, ignoreCase = true) || it.countryCode.equals(countryName, ignoreCase = true)) && (it.city.isNullOrBlank() || it.city.equals(cityName, ignoreCase = true)) }
-            if (matchedGeo != null) {
-                if (matchedGeo.action == "BLOCK") {
-                    finalAction = Action.BLOCK
-                    ruleApplied = true
-                } else if (matchedGeo.action == "FLAG" && finalAction != Action.BLOCK) {
-                    finalAction = Action.FLAG
-                }
-            }
+            // Geo Rules are now applied asynchronously. The C++ layer will handle the block
+            // if the async logging coroutine determines this IP violates a Geo rule and adds it. 
 
             // Check UID rule
             val uidKey = "${TargetType.APPLICATION.name}:$uid"
@@ -775,16 +1052,16 @@ val targetIpString = targetIp.hostAddress ?: ""
                 appName = appInfo.first,
                 packageName = appInfo.second,
                 appIcon = appInfo.third,
-                protocol = if (protocol == 6) { "TCP" } else { "UDP" },
+                protocol = com.mobisec.omniip.core.ProtocolMapper.getName(protocol),
                 sourceIp = sourceIp.hostAddress ?: "",
                 sourcePort = sourcePort,
                 destPort = destPort,
                 destIp = targetIpString,
                 resolvedHostname = hostname,
-                country = countryName,
-                countryCode = countryIsoCode,
-                city = cityName,
-                asn = asnName,
+                country = null,
+                countryCode = null,
+                city = null,
+                asn = null,
                 direction = direction,
                 uid = uid,
                 isBlocked = (ruleApplied && finalAction == Action.BLOCK),
@@ -804,19 +1081,24 @@ val targetIpString = targetIp.hostAddress ?: ""
                 sessionLogCache.put(sessionKey, true)
                 scope.launch(Dispatchers.IO) {
                     try {
+                        val geo = resolveGeoInfo(targetIpString)
+                        val asyncCountryCode = geo.first
+                        val asyncCityName = geo.second
+                        val asyncAsnName = resolveAsnInfo(targetIpString)
+
                         val db = AppDatabase.getDatabase(this@OmniVpnService)
                         val logDao = db.connectionLogDao()
                         logDao.insertLog(
                             ConnectionLog(
-                                destIp = destIp.hostAddress ?: "Unknown",
+                                destIp = targetIpString,
                                 destPort = destPort,
-                                asn = asnName,
-                                countryCode = countryIsoCode,
-                                country = countryName,
-                                city = cityName,
+                                asn = asyncAsnName,
+                                countryCode = asyncCountryCode,
+                                country = null, // UI will map it if needed
+                                city = asyncCityName,
                                 appName = appInfo.first,
                                 action = actionStr,
-                                protocol = if (protocol == 6) { "TCP" } else { "UDP" },
+                                protocol = com.mobisec.omniip.core.ProtocolMapper.getName(protocol),
                                 sourceIp = sourceIp.hostAddress,
                                 sourcePort = sourcePort,
                                 domainName = hostname,
@@ -826,6 +1108,26 @@ val targetIpString = targetIp.hostAddress ?: ""
                         val sharedPrefs = getSharedPreferences("telemetry_prefs", android.content.Context.MODE_PRIVATE)
                         val maxLogs = sharedPrefs.getInt("connection_log_max_size", 1000)
                         logDao.trimLogs(maxLogs)
+                        
+                        // Async Geo Rule Check
+                        val matchedGeoAsync = geoRulesList.find { 
+                            it.countryCode.equals(asyncCountryCode, ignoreCase = true) && 
+                            (it.city.isNullOrBlank() || it.city.equals(asyncCityName, ignoreCase = true)) 
+                        }
+                        if (matchedGeoAsync != null && matchedGeoAsync.action == "BLOCK") {
+                            // Automatically add a temporary block rule to C++ for this IP
+                            val fwDao = db.firewallRuleDao()
+                            fwDao.insertRule(FirewallRule(
+                                targetType = TargetType.IP_ADDRESS,
+                                targetValue = targetIpString,
+                                action = Action.BLOCK,
+                                timestamp = System.currentTimeMillis()
+                            ))
+                            // Signal engine update
+                            val rules = fwDao.getAllRulesSync()
+                            com.mobisec.omniip.core.NativeEngine.syncRulesToNative(rules)
+                        }
+
                     } catch (e: Exception) {
                         Log.e(TAG, "Error logging connection", e)
                     }
@@ -841,6 +1143,9 @@ val targetIpString = targetIp.hostAddress ?: ""
     }
 
     private fun resolveUid(protocol: Int, sourceIp: InetAddress, sourcePort: Int, destIp: InetAddress, destPort: Int): Int {
+        if (protocol != 6 && protocol != 17) {
+            return -1
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             return com.mobisec.omniip.core.UidMapper.resolveUid(this, protocol, sourceIp, sourcePort, destIp, destPort)
         } else {
@@ -902,13 +1207,33 @@ val targetIpString = targetIp.hostAddress ?: ""
                     val responseBody = response.body?.bytes()
                     if (responseBody != null) {
                         val responseDnsPacket = DnsPacket(responseBody, 0, responseBody.size)
-
                         val domain = responseDnsPacket.domain
                         if (domain != null) {
                             val resolvedIps = responseDnsPacket.getResolvedIps()
                             for (ip in resolvedIps) {
-                                dnsCache.put(ip, domain)
+                                com.mobisec.omniip.core.DnsResolver.put(ip, domain)
                             }
+                            
+                            // Log the successful query
+                            val db = AppDatabase.getDatabase(this@OmniVpnService)
+                            val logDao = db.connectionLogDao()
+                            logDao.insertLog(
+                                ConnectionLog(
+                                    destIp = originalDestIp.hostAddress ?: "Unknown",
+                                    destPort = 53,
+                                    asn = null,
+                                    countryCode = null,
+                                    country = null,
+                                    city = null,
+                                    appName = "DNS SYSTEM",
+                                    action = "ALLOW",
+                                    protocol = "UDP",
+                                    sourceIp = originalSourceIp.hostAddress,
+                                    sourcePort = originalSourcePort,
+                                    domainName = domain,
+                                    direction = "OUTBOUND"
+                                )
+                            )
                         }
 
                         // Reconstruct IP/UDP header and write back

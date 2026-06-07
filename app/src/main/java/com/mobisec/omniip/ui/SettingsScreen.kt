@@ -427,16 +427,67 @@ fun SettingsScreen(onShowArchitectureDoc: () -> Unit = {}) {
         Spacer(modifier = Modifier.height(16.dp))
 
         DatasetManagerItem("GeoIP City Database", geoIpCityExists, onDelete = {
-            File(context.filesDir, "GeoLite2-City.mmdb").delete()
+            File(context.cacheDir, "GeoLite2-City.mmdb").delete()
             geoIpCityExists = false
+        }, onUpdate = {
+            val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
+            scope.launch {
+                try {
+                    val url = java.net.URL("https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-City.mmdb")
+                    val connection = url.openConnection()
+                    connection.connect()
+                    val input = connection.getInputStream()
+                    val file = File(context.cacheDir, "GeoLite2-City.mmdb")
+                    val output = java.io.FileOutputStream(file)
+                    input.copyTo(output)
+                    output.close()
+                    input.close()
+                    geoIpCityExists = true
+                } catch (e: Exception) {
+                    android.util.Log.e("OmniIP", "Failed to download GeoIP City", e)
+                }
+            }
         })
         DatasetManagerItem("GeoIP ASN Database", geoIpAsnExists, onDelete = {
-            File(context.filesDir, "GeoLite2-ASN.mmdb").delete()
+            File(context.cacheDir, "GeoLite2-ASN.mmdb").delete()
             geoIpAsnExists = false
+        }, onUpdate = {
+            val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
+            scope.launch {
+                try {
+                    val url = java.net.URL("https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-ASN.mmdb")
+                    val connection = url.openConnection()
+                    connection.connect()
+                    val input = connection.getInputStream()
+                    val file = File(context.cacheDir, "GeoLite2-ASN.mmdb")
+                    val output = java.io.FileOutputStream(file)
+                    input.copyTo(output)
+                    output.close()
+                    input.close()
+                    geoIpAsnExists = true
+                } catch (e: Exception) {
+                    android.util.Log.e("OmniIP", "Failed to download GeoIP ASN", e)
+                }
+            }
         })
         DatasetManagerItem("MAC OUI Database", ouiExists, onDelete = {
             File(context.filesDir, "oui.txt").delete()
             ouiExists = false
+        }, onUpdate = {
+            val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
+            scope.launch {
+                try {
+                    val file = File(context.filesDir, "oui.txt")
+                    context.assets.open("oui.txt").use { input ->
+                        java.io.FileOutputStream(file).use { output ->
+                            input.copyTo(output)
+                        }
+                    }
+                    ouiExists = true
+                } catch (e: Exception) {
+                    android.util.Log.e("OmniIP", "Failed to update MAC OUI", e)
+                }
+            }
         })
         DatasetManagerItem(
             title = "Threat Bloom Filter",
@@ -448,13 +499,24 @@ fun SettingsScreen(onShowArchitectureDoc: () -> Unit = {}) {
             onUpdate = {
                 val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
                 scope.launch {
-                    val file = File(context.filesDir, "threat_bloom.bin")
-                    file.writeText("dummy_bloom_data")
-                    // Dummy compilation for Bloom Filter synchronization
-                    val dummyBitArray = LongArray(100) { it.toLong() }
-                    val dummyHashCount = 3
-                    com.mobisec.omniip.core.NativeEngine.syncThreatBloomFilter(dummyBitArray, dummyHashCount)
-                    malwareFeedExists = true
+                    try {
+                        val file = File(context.filesDir, "threat_bloom.bin")
+                        val emptyFilter = com.google.common.hash.BloomFilter.create(
+                            com.google.common.hash.Funnels.stringFunnel(Charsets.UTF_8),
+                            10000,
+                            0.01
+                        )
+                        java.io.FileOutputStream(file).use { out ->
+                            emptyFilter.writeTo(out)
+                        }
+                        // Dummy compilation for Bloom Filter synchronization
+                        val dummyBitArray = LongArray(100) { it.toLong() }
+                        val dummyHashCount = 3
+                        com.mobisec.omniip.core.NativeEngine.syncThreatBloomFilter(dummyBitArray, dummyHashCount)
+                        malwareFeedExists = true
+                    } catch (e: Exception) {
+                        android.util.Log.e("OmniIP", "Failed to create dummy Bloom filter", e)
+                    }
                 }
             }
         )
@@ -543,6 +605,8 @@ fun SettingsScreen(onShowArchitectureDoc: () -> Unit = {}) {
 
 @Composable
 fun DatasetManagerItem(title: String, exists: Boolean, onDelete: () -> Unit, onUpdate: () -> Unit = {}) {
+    var isDownloading by remember { mutableStateOf(false) }
+
     Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
         Row(
             modifier = Modifier.padding(16.dp),
@@ -551,8 +615,8 @@ fun DatasetManagerItem(title: String, exists: Boolean, onDelete: () -> Unit, onU
             Column(modifier = Modifier.weight(1f)) {
                 Text(title, fontSize = 16.sp)
                 Text(
-                    text = if (exists) "Installed" else "Missing at present",
-                    color = if (exists) MatrixGreen else AlertRed,
+                    text = if (exists) "Installed" else if (isDownloading) "Downloading..." else "Missing at present",
+                    color = if (exists) MatrixGreen else if (isDownloading) TacticalAmber else AlertRed,
                     fontSize = 12.sp
                 )
             }
@@ -565,10 +629,14 @@ fun DatasetManagerItem(title: String, exists: Boolean, onDelete: () -> Unit, onU
                 }
             } else {
                 Button(
-                    onClick = onUpdate,
+                    onClick = {
+                        isDownloading = true
+                        onUpdate()
+                    },
+                    enabled = !isDownloading,
                     colors = ButtonDefaults.buttonColors(containerColor = MatrixGreen)
                 ) {
-                    Text("Update")
+                    Text("Download/Install")
                 }
             }
         }

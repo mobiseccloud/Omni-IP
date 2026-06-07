@@ -20,6 +20,10 @@ object UidMapper {
         destIp: InetAddress,
         destPort: Int
     ): Int {
+        if (protocol != 6 && protocol != 17) {
+            return -1
+        }
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             try {
                 val cm = context.getSystemService(ConnectivityManager::class.java)
@@ -31,7 +35,8 @@ object UidMapper {
             } catch (e: SecurityException) {
                 Log.e(TAG, "SecurityException resolving UID", e)
             } catch (e: IllegalArgumentException) {
-                Log.e(TAG, "IllegalArgumentException resolving UID", e)
+                Log.w(TAG, "IllegalArgumentException resolving UID: ${e.message}")
+                return -1
             }
         }
         return -2 // Fallback or unsupported
@@ -40,6 +45,9 @@ object UidMapper {
     private val appInfoCache = ConcurrentHashMap<Int, Pair<String, String>>()
 
     fun getAppInfo(context: Context, uid: Int): Triple<String, String, Drawable?> {
+        if (uid == -1) {
+            return Triple("System (Connectionless)", "uid:system", null)
+        }
         if (uid == -2) {
             return Triple("Error", "uid:error", null)
         }

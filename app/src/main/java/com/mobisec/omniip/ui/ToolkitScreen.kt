@@ -485,10 +485,34 @@ fun IpCalculatorScreen(viewModel: IpCalculatorViewModel = viewModel()) {
     }
 }
 @Composable
-fun ConnectionLogScreen(viewModel: ConnectionLogViewModel = viewModel()) {
+fun ConnectionLogScreen(
+    viewModel: ConnectionLogViewModel = viewModel(),
+    telemetryViewModel: com.mobisec.omniip.viewmodel.TelemetryViewModel = viewModel()
+) {
     val logs by viewModel.logs.collectAsState()
     val selectedActions by viewModel.selectedActions.collectAsState()
     val isLogPoolFull by viewModel.isLogPoolFull.collectAsState()
+
+    var showAddRuleDialog by remember { mutableStateOf(false) }
+    var addRuleInitialIp by remember { mutableStateOf("") }
+    var addRuleInitialDomain by remember { mutableStateOf<String?>(null) }
+    var addRuleInitialPackage by remember { mutableStateOf<String?>(null) }
+    var addRuleInitialCountry by remember { mutableStateOf<String?>(null) }
+    var addRuleInitialType by remember { mutableStateOf(com.mobisec.omniip.db.TargetType.IP_ADDRESS) }
+
+    if (showAddRuleDialog) {
+        com.mobisec.omniip.ui.AddRuleDialog(
+            initialTargetIp = addRuleInitialIp,
+            initialTargetDomain = addRuleInitialDomain,
+            initialPackageName = addRuleInitialPackage,
+            initialCountryCode = addRuleInitialCountry,
+            initialType = addRuleInitialType,
+            onDismiss = { showAddRuleDialog = false },
+            onAdd = { type, value, action, direction, port ->
+                telemetryViewModel.addRule(type, value, action, direction, port)
+            }
+        )
+    }
 
     Column(modifier = Modifier.fillMaxSize().background(PureBlack).padding(16.dp)) {
         Text("CONNECTION LOG MODULE", color = MatrixGreen, fontSize = 20.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
@@ -601,11 +625,26 @@ fun ConnectionLogScreen(viewModel: ConnectionLogViewModel = viewModel()) {
                         val srcIp = log.sourceIp ?: "Unknown"
                         val srcPort = log.sourcePort?.toString() ?: "Unknown"
                         val dirStr = log.direction ?: ""
-                        Text("$protocolStr $dirStr | Src: $srcIp:$srcPort", color = MatrixGreen.copy(alpha = 0.6f), fontSize = 12.sp)
-
-                        if (log.countryCode != null || log.city != null || log.asn != null || log.country != null) {
-                            val geoStr = listOfNotNull(log.city, log.country ?: log.countryCode, log.asn).joinToString(" - ")
-                            Text(geoStr, color = MatrixGreen.copy(alpha = 0.6f), fontSize = 12.sp)
+                        
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Column {
+                                Text("$protocolStr $dirStr | Src: $srcIp:$srcPort", color = MatrixGreen.copy(alpha = 0.6f), fontSize = 12.sp)
+        
+                                if (log.countryCode != null || log.city != null || log.asn != null || log.country != null) {
+                                    val geoStr = listOfNotNull(log.city, log.country ?: log.countryCode, log.asn).joinToString(" - ")
+                                    Text(geoStr, color = MatrixGreen.copy(alpha = 0.6f), fontSize = 12.sp)
+                                }
+                            }
+                            IconButton(onClick = {
+                                addRuleInitialIp = log.destIp
+                                addRuleInitialDomain = log.domainName
+                                addRuleInitialPackage = null
+                                addRuleInitialCountry = log.countryCode
+                                addRuleInitialType = if (log.domainName != null) com.mobisec.omniip.db.TargetType.DOMAIN else com.mobisec.omniip.db.TargetType.IP_ADDRESS
+                                showAddRuleDialog = true
+                            }, modifier = Modifier.size(24.dp)) {
+                                Icon(androidx.compose.material.icons.Icons.Default.Add, contentDescription = "Add Rule", tint = MatrixGreen)
+                            }
                         }
                     }
                 }

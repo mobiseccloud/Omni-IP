@@ -29,10 +29,21 @@ class TelemetryViewModel(application: Application) : AndroidViewModel(applicatio
 
     init {
         viewModelScope.launch {
-            OmniVpnService.telemetryFlow.collect { telemetry: ConnectionTelemetry ->
-                if (telemetry.isIgnored) return@collect
+            OmniVpnService.telemetryFlow.collect { rawTelemetry: ConnectionTelemetry ->
+                if (rawTelemetry.isIgnored) return@collect
+                
+                // Asynchronously resolve GeoLite2 data if missing
+                var telemetry = rawTelemetry
+                val remoteIp = if (telemetry.direction == ConnectionDirection.INBOUND_STR) telemetry.sourceIp else telemetry.destIp
+                val remotePort = telemetry.destPort
+                if (telemetry.countryCode == null) {
+                    val geo = OmniVpnService.resolveGeoInfo(remoteIp)
+                    val asn = OmniVpnService.resolveAsnInfo(remoteIp)
+                    telemetry = telemetry.copy(countryCode = geo.first, city = geo.second, asn = asn)
+                }
+
                 val uid = telemetry.uid
-                val signature = "${telemetry.uid}:${telemetry.destIp}:${telemetry.destPort}:${telemetry.protocol}"
+                val signature = "${telemetry.uid}:${remoteIp}:${remotePort}:${telemetry.protocol}"
 
                 val currentSummary = connectionStateMap[uid] ?: AppConnectionSummary(
                     uid = uid,
@@ -78,7 +89,7 @@ class TelemetryViewModel(application: Application) : AndroidViewModel(applicatio
                         lastActive = System.currentTimeMillis(),
                         country = telemetry.country ?: existing.country,
                         countryCode = telemetry.countryCode ?: existing.countryCode,
-                        city = telemetry.city ?: existing.city,
+                        city = telemetry.city, asn = telemetry.asn ?: existing.city,
                         domainName = telemetry.resolvedHostname ?: existing.domainName
                     )
                 } else {
@@ -100,10 +111,10 @@ class TelemetryViewModel(application: Application) : AndroidViewModel(applicatio
                             signature = signature,
                             domainName = domainName,
                             protocol = telemetry.protocol,
-                            sourceIp = telemetry.sourceIp,
-                            sourcePort = telemetry.sourcePort,
-                            destIp = telemetry.destIp,
-                            destPort = telemetry.destPort,
+                            sourceIp = if (telemetry.direction == ConnectionDirection.INBOUND_STR) telemetry.destIp else telemetry.sourceIp,
+                            sourcePort = if (telemetry.direction == ConnectionDirection.INBOUND_STR) telemetry.destPort else telemetry.sourcePort,
+                            destIp = remoteIp,
+                            destPort = remotePort,
                             isBlocked = telemetry.isBlocked,
                             direction = telemetry.direction,
                             bytesTx = telemetry.txBytes.toLong() + tx,
@@ -112,7 +123,7 @@ class TelemetryViewModel(application: Application) : AndroidViewModel(applicatio
                             lastActive = System.currentTimeMillis(),
                             countryCode = telemetry.countryCode,
                             country = telemetry.country,
-                            city = telemetry.city
+                            city = telemetry.city, asn = telemetry.asn
                         )
                     )
                 }
@@ -141,7 +152,7 @@ class TelemetryViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun addRule(targetType: TargetType, targetValue: String, action: Action) {
+    fun addRule(targetType: TargetType, targetValue: String, action: Action, direction: com.mobisec.omniip.model.RuleDirection = com.mobisec.omniip.model.RuleDirection.BOTH, targetPort: Int = 0) {
         viewModelScope.launch(Dispatchers.IO) {
             if (targetType == TargetType.GEOLOCATION) {
                 val parts = targetValue.split("|")
@@ -154,7 +165,7 @@ class TelemetryViewModel(application: Application) : AndroidViewModel(applicatio
                     timestamp = System.currentTimeMillis()
                 ))
             } else {
-                dao.insertRule(FirewallRule(targetType = targetType, targetValue = targetValue, action = action))
+                dao.insertRule(FirewallRule(targetType = targetType, targetValue = targetValue, action = action, direction = direction, targetPort = targetPort))
             }
         }
     }

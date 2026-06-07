@@ -22,3 +22,9 @@ Omni-IP is heavily armored against reverse engineering and runtime modification.
 *   **Jetpack Compose:** Drives the tactical "Pocket SOC" dark theme UI.
 *   **Kotlin Coroutines:** Manages asynchronous data flows, database interactions, and UI state.
 *   **VpnService Loopback Interface:** Facilitates the local interception and routing of all device network traffic without external servers.
+
+## Paygate Premium Features
+The following features define the upcoming Premium tier for enterprise and power users:
+*   **Shizuku Capability Unlock:** Leverages the Shizuku API to perform rootless, privileged system-level operations. This bypasses standard Android sandbox limitations, enabling raw packet injection, active process termination (PID killing), and deep port scanning.
+*   **BYOB (Bring Your Own Backend):** Enables enterprise organizations to securely pipeline live tactical telemetry directly into their own custom threat-intelligence backends or SIEM systems (e.g., Splunk, ELK stack) using secure mTLS.
+*   **Automated Continuous PCAP Sync:** Unlocks the ability to continuously stream live packet captures (PCAP) and forensic CSV logs to a remote server or secure cloud bucket for continuous monitoring.

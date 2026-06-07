@@ -138,10 +138,12 @@ android {
 
 tasks.whenTaskAdded {
     if (name.contains("externalNativeBuild") || name.contains("configureCMake") || name.contains("generateJsonModel")) {
-        if (name.contains("Debug", ignoreCase = true)) {
-            dependsOn("generateDebugSecurityConfig")
-        } else if (name.contains("Release", ignoreCase = true)) {
-            dependsOn("generateReleaseSecurityConfig")
+        if (!name.contains("Clean", ignoreCase = true)) {
+            if (name.contains("Debug", ignoreCase = true)) {
+                dependsOn("generateDebugSecurityConfig")
+            } else if (name.contains("Release", ignoreCase = true)) {
+                dependsOn("generateReleaseSecurityConfig")
+            }
         }
     }
 }

@@ -12,6 +12,9 @@ interface GeoRuleDao {
     @Query("SELECT * FROM geo_rules")
     fun getAllRules(): Flow<List<GeoRule>>
 
+    @Query("SELECT * FROM geo_rules")
+    fun getAllRulesSync(): List<GeoRule>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertRule(rule: GeoRule)
 

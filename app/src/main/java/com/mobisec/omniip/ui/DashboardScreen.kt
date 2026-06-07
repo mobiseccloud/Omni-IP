@@ -79,8 +79,8 @@ fun DashboardScreen(
             initialCountryCode = addRuleInitialCountry,
             initialType = addRuleInitialType,
             onDismiss = { showAddRuleDialog = false },
-            onAdd = { type, value, action ->
-                telemetryViewModel.addRule(type, value, action)
+            onAdd = { type, value, action, direction, port ->
+                telemetryViewModel.addRule(type, value, action, direction, port)
             }
         )
     }
@@ -477,7 +477,7 @@ fun ConnectionTelemetryRow(
             if (!conn.domainName.isNullOrBlank()) {
                 Text(conn.domainName, color = MatrixGreen.copy(alpha = 0.8f), fontSize = 10.sp)
             }
-            val locationParts = listOfNotNull(conn.city, conn.country).filter { it.isNotBlank() }
+            val locationParts = listOfNotNull(conn.city, conn.country, conn.asn).filter { it.isNotBlank() }
             if (locationParts.isNotEmpty()) {
                 Text(locationParts.joinToString(", "), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), fontSize = 8.sp)
             } else if (!conn.countryCode.isNullOrBlank()) {
@@ -509,11 +509,13 @@ fun AddRuleDialog(
     initialCountryCode: String?,
     initialType: com.mobisec.omniip.db.TargetType,
     onDismiss: () -> Unit,
-    onAdd: (com.mobisec.omniip.db.TargetType, String, com.mobisec.omniip.db.Action) -> Unit
+    onAdd: (com.mobisec.omniip.db.TargetType, String, com.mobisec.omniip.db.Action, com.mobisec.omniip.model.RuleDirection, Int) -> Unit
 ) {
     var ruleTargetType by remember { mutableStateOf(initialType) }
     var useDomain by remember { mutableStateOf(initialType == com.mobisec.omniip.db.TargetType.DOMAIN) }
     var action by remember { mutableStateOf(com.mobisec.omniip.db.Action.BLOCK) }
+    var direction by remember { mutableStateOf(com.mobisec.omniip.model.RuleDirection.BOTH) }
+    var targetPort by remember { mutableStateOf("") }
     var manualCountryCode by remember { mutableStateOf(initialCountryCode ?: "") }
     var manualCityName by remember { mutableStateOf("") }
 
@@ -578,6 +580,18 @@ fun AddRuleDialog(
                         Text("Ignore", color = TextSecondary, fontSize = 12.sp)
                     }
                 }
+                
+                if (actualTargetType != com.mobisec.omniip.db.TargetType.GEOLOCATION) {
+                    Text("Direction", fontWeight = FontWeight.Bold, color = TextSecondary)
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        com.mobisec.omniip.model.RuleDirection.values().forEach { dir ->
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                RadioButton(selected = direction == dir, onClick = { direction = dir })
+                                Text(dir.name, color = TextSecondary, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
 
                 if (actualTargetType == com.mobisec.omniip.db.TargetType.GEOLOCATION) {
                     OutlinedTextField(
@@ -600,6 +614,13 @@ fun AddRuleDialog(
                         modifier = Modifier.fillMaxWidth(),
                         enabled = false
                     )
+                    OutlinedTextField(
+                        value = targetPort,
+                        onValueChange = { targetPort = it },
+                        label = { Text("Port (Optional)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Number)
+                    )
                 }
             }
         },
@@ -608,7 +629,7 @@ fun AddRuleDialog(
                 val finalTargetValue = if (actualTargetType == com.mobisec.omniip.db.TargetType.GEOLOCATION) {
                     "$manualCountryCode|$manualCityName"
                 } else targetValue
-                onAdd(actualTargetType, finalTargetValue, action)
+                onAdd(actualTargetType, finalTargetValue, action, direction, targetPort.toIntOrNull() ?: 0)
                 onDismiss()
             }, enabled = if (actualTargetType == com.mobisec.omniip.db.TargetType.GEOLOCATION) manualCountryCode.isNotBlank() else targetValue.isNotBlank()) { Text("Add Rule") }
         },

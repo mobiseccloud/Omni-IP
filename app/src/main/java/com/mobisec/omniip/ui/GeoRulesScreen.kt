@@ -68,13 +68,23 @@ fun GeoRulesScreen(viewModel: GeoRulesViewModel = viewModel(), onRequirePremium:
     }
 
     if (showAddDialog) {
-        var selectedCountry by remember { mutableStateOf("") }
+        var selectedCountryCode by remember { mutableStateOf("") }
+        var selectedCountryName by remember { mutableStateOf("") }
         var selectedCity by remember { mutableStateOf("") }
         var selectedAction by remember { mutableStateOf("BLOCK") }
         var expanded by remember { mutableStateOf(false) }
         var actionExpanded by remember { mutableStateOf(false) }
 
-        val countries = listOf("CN", "RU", "IR", "KP", "US", "GB", "DE", "FR")
+        val countriesMap = remember { 
+            java.util.Locale.getISOCountries().map { 
+                it to java.util.Locale("", it).displayCountry 
+            }.sortedBy { it.second } 
+        }
+
+        val filteredCountries = countriesMap.filter { 
+            it.second.contains(selectedCountryName, ignoreCase = true) || 
+            it.first.contains(selectedCountryName, ignoreCase = true)
+        }
 
         AlertDialog(
             onDismissRequest = { showAddDialog = false },
@@ -86,24 +96,36 @@ fun GeoRulesScreen(viewModel: GeoRulesViewModel = viewModel(), onRequirePremium:
                         onExpandedChange = { expanded = !expanded }
                     ) {
                         OutlinedTextField(
-                            value = selectedCountry,
-                            onValueChange = { selectedCountry = it },
-                            label = { Text("Country Code") },
-                            modifier = Modifier.menuAnchor(),
+                            value = selectedCountryName,
+                            onValueChange = { 
+                                selectedCountryName = it
+                                expanded = true
+                                val exactMatch = countriesMap.find { c -> c.second.equals(it, ignoreCase = true) }
+                                if (exactMatch != null) selectedCountryCode = exactMatch.first else selectedCountryCode = it
+                            },
+                            label = { Text("Country") },
+                            modifier = Modifier.menuAnchor().fillMaxWidth(),
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedTextColor = MatrixGreen,
                                 unfocusedTextColor = MatrixGreen
                             )
                         )
-                        ExposedDropdownMenu(
-                            expanded = expanded,
-                            onDismissRequest = { expanded = false }
-                        ) {
-                            countries.forEach { country ->
-                                DropdownMenuItem(
-                                    text = { Text(country) },
-                                    onClick = { selectedCountry = country; expanded = false }
-                                )
+                        if (filteredCountries.isNotEmpty() && expanded) {
+                            ExposedDropdownMenu(
+                                expanded = expanded,
+                                onDismissRequest = { expanded = false },
+                                modifier = Modifier.heightIn(max = 200.dp)
+                            ) {
+                                filteredCountries.forEach { country ->
+                                    DropdownMenuItem(
+                                        text = { Text("${country.second} (${country.first})") },
+                                        onClick = { 
+                                            selectedCountryName = country.second
+                                            selectedCountryCode = country.first
+                                            expanded = false 
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -157,14 +179,18 @@ fun GeoRulesScreen(viewModel: GeoRulesViewModel = viewModel(), onRequirePremium:
             confirmButton = {
                 Button(
                     onClick = {
-                        if (selectedCountry.isNotBlank()) {
-                            viewModel.addRule(selectedCountry, selectedCity.takeIf { it.isNotBlank() }, selectedAction)
+                        if (selectedCountryCode.isNotBlank()) {
+                            viewModel.addRule(
+                                countryCode = selectedCountryCode.uppercase(),
+                                city = selectedCity.trim().takeIf { it.isNotBlank() },
+                                action = selectedAction
+                            )
                             showAddDialog = false
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = MatrixGreen)
                 ) {
-                    Text("SAVE", color = PureBlack)
+                    Text("ADD", color = PureBlack, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {

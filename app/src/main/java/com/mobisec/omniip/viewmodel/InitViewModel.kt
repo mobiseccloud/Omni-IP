@@ -26,13 +26,13 @@ class InitViewModel(application: Application) : AndroidViewModel(application) {
             val context = getApplication<Application>()
 
             // Check if files exist AND are larger than a realistic minimum size
-            val cityFile = File(context.filesDir, "GeoLite2-City.mmdb")
-            val asnFile = File(context.filesDir, "GeoLite2-ASN.mmdb")
+            val cityFile = File(context.cacheDir, "GeoLite2-City.mmdb")
+            val asnFile = File(context.cacheDir, "GeoLite2-ASN.mmdb")
             val ouiFile = File(context.filesDir, "oui.txt")
 
-            val filesValid = cityFile.exists() && cityFile.length() > 100 &&
-                             asnFile.exists() && asnFile.length() > 100 &&
-                             ouiFile.exists() && ouiFile.length() > 100
+            val filesValid = cityFile.exists() && cityFile.length() > 1000 &&
+                             asnFile.exists() && asnFile.length() > 1000 &&
+                             ouiFile.exists() && ouiFile.length() > 1000
 
             if (filesValid) {
                 _initStatus.value = "Datasets already initialized."
@@ -41,33 +41,31 @@ class InitViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             try {
-                // Download oui.txt if missing or too small
-                if (!ouiFile.exists() || ouiFile.length() <= 100) {
-                    _initStatus.value = "Downloading MAC OUI database..."
-                    val url = URL("https://standards-oui.ieee.org/oui/oui.txt")
-                    val connection = url.openConnection()
-                    connection.connect()
-
-                    connection.getInputStream().use { input ->
+                if (!ouiFile.exists() || ouiFile.length() <= 1000) {
+                    _initStatus.value = "Extracting MAC OUI database..."
+                    context.assets.open("oui.txt").use { input ->
                         FileOutputStream(ouiFile).use { output ->
                             input.copyTo(output)
                         }
                     }
-                    Log.d("InitViewModel", "Downloaded oui.txt to filesDir")
                 }
 
-                // Copy missing MMDB files from assets (if they were bundled, though the prompt implies downloading or at least handling them via filesDir)
-                // For the sake of this prompt, we assume we need to handle the dummy file fallback gracefully if downloads fail.
-
-                if (!cityFile.exists() || cityFile.length() <= 100) {
-                     // Simulated download failure handling
-                     _initStatus.value = "Creating dummy file for GeoLite2-City.mmdb (Network failed)"
-                     cityFile.writeText("dummy content")
+                if (!cityFile.exists() || cityFile.length() <= 1000) {
+                     _initStatus.value = "Extracting GeoLite2-City database..."
+                     context.assets.open("GeoLite2-City.mmdb").use { input ->
+                         FileOutputStream(cityFile).use { output ->
+                             input.copyTo(output)
+                         }
+                     }
                 }
 
-                if (!asnFile.exists() || asnFile.length() <= 100) {
-                     _initStatus.value = "Creating dummy file for GeoLite2-ASN.mmdb (Network failed)"
-                     asnFile.writeText("dummy content")
+                if (!asnFile.exists() || asnFile.length() <= 1000) {
+                     _initStatus.value = "Extracting GeoLite2-ASN database..."
+                     context.assets.open("GeoLite2-ASN.mmdb").use { input ->
+                         FileOutputStream(asnFile).use { output ->
+                             input.copyTo(output)
+                         }
+                     }
                 }
 
                 _isInitialized.value = true
@@ -75,13 +73,6 @@ class InitViewModel(application: Application) : AndroidViewModel(application) {
 
             } catch (e: Exception) {
                 Log.e("InitViewModel", "Failed initialization", e)
-
-                // On failure, create dummy file to prevent crashes, but ensure length is small so it triggers download next time
-                if (!ouiFile.exists()) {
-                    _initStatus.value = "Creating dummy file for oui.txt (Network failed)"
-                    ouiFile.writeText("dummy") // Length will be 5 bytes, < 100 bytes
-                }
-
                 _isInitialized.value = true // Let app proceed with graceful degradation
             }
         }

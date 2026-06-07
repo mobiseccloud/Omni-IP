@@ -19,6 +19,8 @@ import com.mobisec.omniip.ui.theme.AlertRed
 import com.mobisec.omniip.ui.theme.MatrixGreen
 import com.mobisec.omniip.ui.theme.TacticalAmber
 import com.mobisec.omniip.ui.theme.TextSecondary
+import com.mobisec.omniip.ui.theme.PureBlack
+import com.mobisec.omniip.ui.theme.SurfaceLevel1
 import com.mobisec.omniip.viewmodel.RulesViewModel
 import kotlinx.coroutines.launch
 import android.content.Intent
@@ -112,45 +114,99 @@ fun RulesScreen(viewModel: RulesViewModel, onRequirePremium: () -> Unit = {}) {
                 if (showAddDialog) {
                     var ipInput by remember { mutableStateOf("") }
                     var portInput by remember { mutableStateOf("") }
+                    var selectedDirection by remember { mutableStateOf(com.mobisec.omniip.model.RuleDirection.BOTH) }
+                    var directionExpanded by remember { mutableStateOf(false) }
+
                     AlertDialog(
                         onDismissRequest = { showAddDialog = false },
-                        title = { Text("Add Manual Block Rule") },
+                        title = { Text("Add Manual Block Rule", color = MatrixGreen) },
                         text = {
                             Column {
                                 OutlinedTextField(
                                     value = ipInput,
                                     onValueChange = { ipInput = it },
-                                    label = { Text("IP Address") }
+                                    label = { Text("IP Address / UID") },
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedTextColor = MatrixGreen,
+                                        unfocusedTextColor = MatrixGreen
+                                    )
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
                                 OutlinedTextField(
                                     value = portInput,
                                     onValueChange = { portInput = it },
-                                    label = { Text("Port (Optional)") }
+                                    label = { Text("Port (Optional)") },
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedTextColor = MatrixGreen,
+                                        unfocusedTextColor = MatrixGreen
+                                    )
                                 )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                
+                                @OptIn(ExperimentalMaterial3Api::class)
+                                ExposedDropdownMenuBox(
+                                    expanded = directionExpanded,
+                                    onExpandedChange = { directionExpanded = !directionExpanded }
+                                ) {
+                                    OutlinedTextField(
+                                        value = selectedDirection.name,
+                                        onValueChange = {},
+                                        readOnly = true,
+                                        label = { Text("Direction") },
+                                        modifier = Modifier.menuAnchor().fillMaxWidth(),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedTextColor = MatrixGreen,
+                                            unfocusedTextColor = MatrixGreen
+                                        )
+                                    )
+                                    ExposedDropdownMenu(
+                                        expanded = directionExpanded,
+                                        onDismissRequest = { directionExpanded = false }
+                                    ) {
+                                        com.mobisec.omniip.model.RuleDirection.values().forEach { dir ->
+                                            DropdownMenuItem(
+                                                text = { Text(dir.name) },
+                                                onClick = { 
+                                                    selectedDirection = dir
+                                                    directionExpanded = false 
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         },
                         confirmButton = {
-                            Button(onClick = {
-                                val target = if (portInput.isNotEmpty()) "$ipInput:$portInput" else ipInput
-                                val rule = FirewallRule(
-                                    targetType = TargetType.IP_ADDRESS,
-                                    targetValue = target,
-                                    action = Action.BLOCK
-                                )
-                                val success = viewModel.addManualRule(rule)
-                                if (!success) {
-                                    coroutineScope.launch {
-                                        snackbarHostState.showSnackbar("RULE ALREADY ACTIVE")
+                            Button(
+                                onClick = {
+                                    val port = portInput.toIntOrNull() ?: 0
+                                    val rule = FirewallRule(
+                                        targetType = TargetType.IP_ADDRESS, // Assuming IP for manual add
+                                        targetValue = ipInput,
+                                        targetPort = port,
+                                        direction = selectedDirection,
+                                        action = Action.BLOCK
+                                    )
+                                    val success = viewModel.addManualRule(rule)
+                                    if (!success) {
+                                        coroutineScope.launch {
+                                            snackbarHostState.showSnackbar("RULE ALREADY ACTIVE")
+                                        }
                                     }
-                                }
-                                showAddDialog = false
-                            }) {
-                                Text("ADD")
+                                    showAddDialog = false
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = MatrixGreen)
+                            ) {
+                                Text("ADD", color = PureBlack, fontWeight = FontWeight.Bold)
                             }
                         },
                         dismissButton = {
-                            Button(onClick = { showAddDialog = false }) { Text("CANCEL") }
+                            Button(
+                                onClick = { showAddDialog = false },
+                                colors = ButtonDefaults.buttonColors(containerColor = SurfaceLevel1)
+                            ) { 
+                                Text("CANCEL", color = MaterialTheme.colorScheme.onSurface) 
+                            }
                         }
                     )
                 }

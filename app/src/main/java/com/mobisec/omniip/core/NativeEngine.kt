@@ -15,6 +15,7 @@ object NativeEngine {
     external fun processPacketNative(packetBuffer: java.nio.ByteBuffer, length: Int, pcapFd: Int): Int
     external fun startLwipProxy(vpnFd: Int)
     external fun passToLwip(packetBuffer: java.nio.ByteBuffer, length: Int)
+    external fun killTcpSession(sourceIp: ByteArray, destIp: ByteArray, sourcePort: Int, destPort: Int)
 
         var telemetryCallback: ((Int, String, Int, Int, Int, Int) -> Unit)? = null
     @JvmStatic fun onTelemetryEvent(sourcePort: Int, destIp: String, destPort: Int, protocol: Int, txBytes: Int, rxBytes: Int) {
