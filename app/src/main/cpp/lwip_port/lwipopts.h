@@ -1,0 +1,28 @@
+#ifndef LWIP_CUSTOM_LWIPOPTS_H
+#define LWIP_CUSTOM_LWIPOPTS_H
+
+#define NO_SYS 1
+#define LWIP_SOCKET 0
+#define LWIP_NETCONN 0
+#define LWIP_IPV4 1
+#define LWIP_IPV6 0
+#define LWIP_IGMP 0
+#define LWIP_ICMP 1
+#define LWIP_SNMP 0
+#define LWIP_DNS 0
+#define LWIP_DHCP 0
+#define LWIP_UDP 1
+#define LWIP_TCP 1
+
+#define LWIP_DISABLE_TCP_SANITY_CHECKS 1
+#define MEM_ALIGNMENT 4
+#define MEM_SIZE 256000
+#define TCP_WND 65535
+#define TCP_MSS 1460
+#define TCP_SND_BUF 65535
+#define TCP_SND_QUEUELEN 256
+
+#define LWIP_CALLBACK_API 1
+
+#endif /* LWIP_CUSTOM_LWIPOPTS_H */
+
