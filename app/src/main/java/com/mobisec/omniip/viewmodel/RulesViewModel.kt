@@ -40,12 +40,24 @@ class RulesViewModel(application: Application) : AndroidViewModel(application) {
 
     fun updateRuleAction(rule: FirewallRule, newAction: Action) {
         viewModelScope.launch(Dispatchers.IO) {
-            dao.updateRule(rule.copy(action = newAction))
+            val updatedRule = if (newAction == Action.FLAG || newAction == Action.IGNORE) {
+                rule.copy(action = newAction, blockWifi = false, blockMobile = false)
+            } else {
+                rule.copy(action = newAction)
+            }
+            dao.updateRule(updatedRule)
+            syncRuleToNative(updatedRule)
         }
     }
     fun updateRuleContext(rule: FirewallRule, blockWifi: Boolean, blockMobile: Boolean) {
         viewModelScope.launch(Dispatchers.IO) {
-            dao.updateRule(rule.copy(blockWifi = blockWifi, blockMobile = blockMobile))
+            val updatedRule = if (!blockWifi && !blockMobile) {
+                rule.copy(action = Action.FLAG, blockWifi = false, blockMobile = false)
+            } else {
+                rule.copy(blockWifi = blockWifi, blockMobile = blockMobile)
+            }
+            dao.updateRule(updatedRule)
+            syncRuleToNative(updatedRule)
         }
     }
 

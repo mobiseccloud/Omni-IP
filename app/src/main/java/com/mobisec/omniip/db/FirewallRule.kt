@@ -6,7 +6,7 @@ import com.mobisec.omniip.model.NetworkInterfaceRule
 import com.mobisec.omniip.model.RuleDirection
 
 enum class TargetType {
-    APPLICATION, IP_ADDRESS, DOMAIN
+    APPLICATION, IP_ADDRESS, DOMAIN, GEOLOCATION
 }
 
 enum class Action {
