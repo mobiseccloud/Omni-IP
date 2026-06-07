@@ -9,6 +9,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
@@ -60,6 +63,28 @@ fun DashboardScreen(
     telemetryViewModel: TelemetryViewModel
 ) {
     var showAppSelectionSheet by remember { mutableStateOf(false) }
+
+    var showAddRuleDialog by remember { mutableStateOf(false) }
+    var addRuleInitialIp by remember { mutableStateOf("") }
+    var addRuleInitialDomain by remember { mutableStateOf<String?>(null) }
+    var addRuleInitialPackage by remember { mutableStateOf<String?>(null) }
+    var addRuleInitialCountry by remember { mutableStateOf<String?>(null) }
+    var addRuleInitialType by remember { mutableStateOf(com.mobisec.omniip.db.TargetType.IP_ADDRESS) }
+
+    if (showAddRuleDialog) {
+        AddRuleDialog(
+            initialTargetIp = addRuleInitialIp,
+            initialTargetDomain = addRuleInitialDomain,
+            initialPackageName = addRuleInitialPackage,
+            initialCountryCode = addRuleInitialCountry,
+            initialType = addRuleInitialType,
+            onDismiss = { showAddRuleDialog = false },
+            onAdd = { type, value, action ->
+                telemetryViewModel.addRule(type, value, action)
+            }
+        )
+    }
+
 
     val showPinAuthDialog by viewModel.showPinAuthDialog.collectAsState()
     val pinAuthError by viewModel.pinAuthError.collectAsState()
@@ -234,7 +259,17 @@ fun DashboardScreen(
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             items(appSummaries, key = { it.uid }) { summary ->
-                AppSummaryCard(summary)
+                AppSummaryCard(
+                    summary = summary,
+                    onAddRuleClick = { targetIp, targetDomain, packageName, countryCode, initialType ->
+                        addRuleInitialIp = targetIp
+                        addRuleInitialDomain = targetDomain
+                        addRuleInitialPackage = packageName
+                        addRuleInitialCountry = countryCode
+                        addRuleInitialType = initialType
+                        showAddRuleDialog = true
+                    }
+                )
             }
         }
     }
@@ -283,7 +318,10 @@ fun DashboardScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AppSummaryCard(summary: com.mobisec.omniip.model.AppConnectionSummary) {
+fun AppSummaryCard(
+    summary: com.mobisec.omniip.model.AppConnectionSummary,
+    onAddRuleClick: (String, String?, String?, String?, com.mobisec.omniip.db.TargetType) -> Unit
+) {
     var expanded by remember { mutableStateOf(false) }
     var selectedFilter by remember { mutableStateOf("All") }
 
@@ -317,8 +355,14 @@ fun AppSummaryCard(summary: com.mobisec.omniip.model.AppConnectionSummary) {
                     Text(summary.appName, color = MatrixGreen, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                     Text("Package: ${summary.packageName}", color = TextSecondary, fontSize = 8.sp)
                     Spacer(modifier = Modifier.height(2.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("Active: ${summary.activeConnections.size}", color = TacticalAmber, fontSize = 10.sp)
+                        Spacer(modifier = Modifier.weight(1f))
+                        IconButton(onClick = { 
+                            onAddRuleClick("", null, summary.packageName, null, com.mobisec.omniip.db.TargetType.APPLICATION)
+                        }, modifier = Modifier.size(24.dp)) {
+                            Icon(androidx.compose.material.icons.Icons.Default.Add, contentDescription = "Add Rule", tint = MatrixGreen)
+                        }
                     }
                 }
             }
@@ -353,7 +397,10 @@ fun AppSummaryCard(summary: com.mobisec.omniip.model.AppConnectionSummary) {
                         Text("No active connections matching filter.", color = TextSecondary, fontSize = 12.sp, modifier = Modifier.padding(8.dp))
                     } else {
                         filteredConnections.forEach { conn ->
-                            ConnectionTelemetryRow(conn)
+                            ConnectionTelemetryRow(
+                                conn = conn,
+                                onAddRuleClick = onAddRuleClick
+                            )
                             HorizontalDivider(color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f), thickness = 0.5.dp)
                         }
                     }
@@ -364,7 +411,10 @@ fun AppSummaryCard(summary: com.mobisec.omniip.model.AppConnectionSummary) {
 }
 
 @Composable
-fun ConnectionTelemetryRow(conn: com.mobisec.omniip.model.ConnectionDetails) {
+fun ConnectionTelemetryRow(
+    conn: com.mobisec.omniip.model.ConnectionDetails,
+    onAddRuleClick: (String, String?, String?, String?, com.mobisec.omniip.db.TargetType) -> Unit
+) {
     val dirColor = if (conn.direction == com.mobisec.omniip.model.ConnectionDirection.OUTBOUND_STR) MatrixGreen else TacticalAmber
     val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
     val timeString = timeFormat.format(Date(conn.lastActive))
@@ -385,25 +435,131 @@ fun ConnectionTelemetryRow(conn: com.mobisec.omniip.model.ConnectionDetails) {
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(conn.protocol, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f), fontSize = 10.sp)
                 Spacer(modifier = Modifier.width(4.dp))
-                Text(timeString, color = TextSecondary, fontSize = 10.sp)
+                Text(conn.destIp, color = TextSecondary, fontSize = 10.sp)
+                if (conn.destPort > 0) {
+                    Text(":${conn.destPort}", color = TacticalAmber, fontSize = 10.sp)
+                }
             }
             if (!conn.domainName.isNullOrBlank()) {
-                Text(conn.domainName, color = MatrixGreen, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text(conn.domainName, color = MatrixGreen.copy(alpha = 0.8f), fontSize = 10.sp)
             }
-            Text("${conn.sourceIp}:${conn.sourcePort} -> ${conn.destIp}:${conn.destPort}", color = MatrixGreen, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+            val locationParts = listOfNotNull(conn.city, conn.country).filter { it.isNotBlank() }
+            if (locationParts.isNotEmpty()) {
+                Text(locationParts.joinToString(", "), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), fontSize = 8.sp)
+            } else if (!conn.countryCode.isNullOrBlank()) {
+                Text(conn.countryCode, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f), fontSize = 8.sp)
+            }
         }
-        
-        Column(horizontalAlignment = Alignment.End) {
-            val statusColor = if (conn.isBlocked) AlertRed else MatrixGreen
-            Text(if (conn.isBlocked) "BLOCKED" else "ALLOWED", color = statusColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-            if (conn.country != null || conn.city != null) {
-                val locationParts = listOfNotNull(conn.city, conn.country).filter { it.isNotBlank() }
-                if (locationParts.isNotEmpty()) {
-                    Text(locationParts.joinToString(", "), color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f), fontSize = 10.sp)
-                }
-            } else if (conn.countryCode != null) {
-                Text(conn.countryCode, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f), fontSize = 10.sp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(horizontalAlignment = Alignment.End) {
+                Text(timeString, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f), fontSize = 10.sp)
+                Text("${conn.bytesTx} Tx / ${conn.bytesRx} Rx", color = TextSecondary, fontSize = 8.sp)
+                val statusColor = if (conn.isBlocked) AlertRed else MatrixGreen
+                Text(if (conn.isBlocked) "BLOCKED" else "ALLOWED", color = statusColor, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            IconButton(onClick = {
+                onAddRuleClick(conn.destIp, conn.domainName, null, conn.countryCode, if (conn.domainName != null) com.mobisec.omniip.db.TargetType.DOMAIN else com.mobisec.omniip.db.TargetType.IP_ADDRESS)
+            }, modifier = Modifier.size(24.dp)) {
+                Icon(androidx.compose.material.icons.Icons.Default.Add, contentDescription = "Add Rule", tint = MatrixGreen)
             }
         }
     }
+}
+
+@Composable
+fun AddRuleDialog(
+    initialTargetIp: String,
+    initialTargetDomain: String?,
+    initialPackageName: String?,
+    initialCountryCode: String?,
+    initialType: com.mobisec.omniip.db.TargetType,
+    onDismiss: () -> Unit,
+    onAdd: (com.mobisec.omniip.db.TargetType, String, com.mobisec.omniip.db.Action) -> Unit
+) {
+    var ruleTargetType by remember { mutableStateOf(initialType) }
+    var useDomain by remember { mutableStateOf(initialType == com.mobisec.omniip.db.TargetType.DOMAIN) }
+    var action by remember { mutableStateOf(com.mobisec.omniip.db.Action.BLOCK) }
+
+    val actualTargetType = if (ruleTargetType == com.mobisec.omniip.db.TargetType.IP_ADDRESS && useDomain) com.mobisec.omniip.db.TargetType.DOMAIN else ruleTargetType
+
+    val targetValue = when (actualTargetType) {
+        com.mobisec.omniip.db.TargetType.APPLICATION -> initialPackageName ?: ""
+        com.mobisec.omniip.db.TargetType.IP_ADDRESS -> initialTargetIp
+        com.mobisec.omniip.db.TargetType.DOMAIN -> initialTargetDomain ?: initialTargetIp
+        com.mobisec.omniip.db.TargetType.GEOLOCATION -> initialCountryCode ?: ""
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add Rule", color = MatrixGreen) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text("Target Type", fontWeight = FontWeight.Bold, color = TextSecondary)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    IconButton(
+                        onClick = { ruleTargetType = com.mobisec.omniip.db.TargetType.APPLICATION },
+                        enabled = initialPackageName != null
+                    ) {
+                        Icon(androidx.compose.material.icons.Icons.Default.Menu, "Application", tint = if (ruleTargetType == com.mobisec.omniip.db.TargetType.APPLICATION) MatrixGreen else TextSecondary.copy(alpha = if (initialPackageName != null) 1f else 0.38f))
+                    }
+                    IconButton(onClick = { ruleTargetType = com.mobisec.omniip.db.TargetType.IP_ADDRESS }) {
+                        Icon(androidx.compose.material.icons.Icons.Default.Share, "Network", tint = if (ruleTargetType == com.mobisec.omniip.db.TargetType.IP_ADDRESS || ruleTargetType == com.mobisec.omniip.db.TargetType.DOMAIN) MatrixGreen else TextSecondary)
+                    }
+                    IconButton(
+                        onClick = { ruleTargetType = com.mobisec.omniip.db.TargetType.GEOLOCATION },
+                        enabled = initialCountryCode != null
+                    ) {
+                        Icon(androidx.compose.material.icons.Icons.Default.LocationOn, "Geolocation", tint = if (ruleTargetType == com.mobisec.omniip.db.TargetType.GEOLOCATION) MatrixGreen else TextSecondary.copy(alpha = if (initialCountryCode != null) 1f else 0.38f))
+                    }
+                }
+
+                if ((ruleTargetType == com.mobisec.omniip.db.TargetType.IP_ADDRESS || ruleTargetType == com.mobisec.omniip.db.TargetType.DOMAIN) && initialTargetDomain != null) {
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(selected = !useDomain, onClick = { useDomain = false })
+                            Text("IP Address", color = TextSecondary, fontSize = 12.sp)
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(selected = useDomain, onClick = { useDomain = true })
+                            Text("Domain Name", color = TextSecondary, fontSize = 12.sp)
+                        }
+                    }
+                }
+
+                Text("Action", fontWeight = FontWeight.Bold, color = TextSecondary)
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        RadioButton(selected = action == com.mobisec.omniip.db.Action.BLOCK, onClick = { action = com.mobisec.omniip.db.Action.BLOCK })
+                        Text("Block", color = TextSecondary, fontSize = 12.sp)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        RadioButton(selected = action == com.mobisec.omniip.db.Action.FLAG, onClick = { action = com.mobisec.omniip.db.Action.FLAG })
+                        Text("Flag", color = TextSecondary, fontSize = 12.sp)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        RadioButton(selected = action == com.mobisec.omniip.db.Action.IGNORE, onClick = { action = com.mobisec.omniip.db.Action.IGNORE })
+                        Text("Ignore", color = TextSecondary, fontSize = 12.sp)
+                    }
+                }
+
+                OutlinedTextField(
+                    value = targetValue,
+                    onValueChange = {},
+                    label = { Text("Target") },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = false
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                onAdd(actualTargetType, targetValue, action)
+                onDismiss()
+            }, enabled = targetValue.isNotBlank()) { Text("Add Rule") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel", color = TextSecondary) }
+        }
+    )
 }

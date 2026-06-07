@@ -29,6 +29,7 @@ class TelemetryViewModel(application: Application) : AndroidViewModel(applicatio
     init {
         viewModelScope.launch {
             OmniVpnService.telemetryFlow.collect { telemetry: ConnectionTelemetry ->
+                if (telemetry.isIgnored) return@collect
                 val uid = telemetry.uid
                 val signature = "${telemetry.uid}:${telemetry.destIp}:${telemetry.destPort}:${telemetry.protocol}"
 
