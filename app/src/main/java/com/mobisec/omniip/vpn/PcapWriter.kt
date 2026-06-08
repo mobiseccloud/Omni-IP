@@ -41,7 +41,7 @@ class PcapWriter(private val pfd: ParcelFileDescriptor) {
                     outputStream?.write(packetData)
                     outputStream?.flush()
                 } catch (e: Exception) {
-                    // Ignore IOException
+                    android.util.Log.e("PcapWriter", "Failed to write PCAP data/flush", e)
                 }
             }
         }
@@ -77,12 +77,12 @@ class PcapWriter(private val pfd: ParcelFileDescriptor) {
                 outputStream?.flush() // Ensure all buffered packets are flushed to disk
                 outputStream?.close()
             } catch (e: Exception) {
-                // Ignore
+                android.util.Log.e("PcapWriter", "Error closing PCAP OutputStream", e)
             }
             try {
                 pfd.close()
             } catch (e: Exception) {
-                // Ignore
+                android.util.Log.e("PcapWriter", "Error closing ParcelFileDescriptor", e)
             }
         }
     }

@@ -65,8 +65,9 @@ class LanScannerViewModel(application: Application, private val savedStateHandle
                                 activeIps[ip] = inetAddress.canonicalHostName ?: "Unknown"
                             }
                         } catch (e: Exception) {
-                            // Ignore
+                            android.util.Log.e("LanScannerViewModel", "Error fetching hostname for IP", e)
                         }
+                        Unit
                     }
                 }
                 jobs.awaitAll()
@@ -124,7 +125,9 @@ class LanScannerViewModel(application: Application, private val savedStateHandle
                 }
                 if (foundAny) return map
             }
-        } catch (e: Exception) { }
+        } catch (e: Exception) {
+            android.util.Log.e("LanScannerViewModel", "Error reading ARP cache", e)
+        }
 
         // Fallback to Shizuku/su
         try {
@@ -137,7 +140,7 @@ class LanScannerViewModel(application: Application, private val savedStateHandle
                         method.isAccessible = true
                         process = method.invoke(null, arrayOf("sh", "-c", "ip neigh"), null, null) as Process
                     } catch (e: Exception) {
-                        e.printStackTrace()
+                        android.util.Log.e("LanScannerViewModel", "Shizuku method invocation failed", e)
                     }
                 } else {
                     rikka.shizuku.Shizuku.requestPermission(0)
@@ -166,7 +169,7 @@ class LanScannerViewModel(application: Application, private val savedStateHandle
             reader.close()
             process!!.waitFor()
         } catch (e: Exception) { 
-            e.printStackTrace()
+            android.util.Log.e("LanScannerViewModel", "Error reading Shizuku ip neigh output", e)
         }
 
         return map
@@ -204,7 +207,7 @@ private var ouiMap: Map<String, String>? = null
             } catch (e: java.io.FileNotFoundException) {
                 return "Unknown"
             } catch (e: Exception) {
-                e.printStackTrace()
+                android.util.Log.e("LanScannerViewModel", "Error parsing OUI file", e)
                 return "Unknown"
             }
         }

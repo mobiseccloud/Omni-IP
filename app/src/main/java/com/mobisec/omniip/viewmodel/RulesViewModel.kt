@@ -89,7 +89,7 @@ class RulesViewModel(application: Application) : AndroidViewModel(application) {
             val allRules = dao.getAllRulesSync()
             com.mobisec.omniip.core.NativeEngine.syncRulesToNative(allRules)
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.e("RulesViewModel", "Error syncing rules to native layer", e)
         }
     }
 }

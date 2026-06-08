@@ -82,7 +82,7 @@ object SniExtractor {
                 }
             }
         } catch (e: Exception) {
-            // Ignore malformed packets
+            android.util.Log.w("SniExtractor", "Malformed packet during SNI extraction: ${e.message}")
         } finally {
             packet.position(oldPosition)
         }

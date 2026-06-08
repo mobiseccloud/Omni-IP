@@ -42,6 +42,10 @@ struct EnforcedRule {
 
 static std::shared_ptr<std::unordered_map<uint64_t, EnforcedRule>> g_active_rules = std::make_shared<std::unordered_map<uint64_t, EnforcedRule>>();
 
+// Shizuku Privilege Capability Gate
+std::atomic<bool> g_shizuku_privileged{false};
+std::atomic<int> g_raw_icmp_fd{-1};
+
 static std::unordered_map<uint64_t, bool> g_dns_blocklist;
 static std::shared_mutex g_dns_blocklist_mutex;
 
@@ -699,6 +703,92 @@ Java_com_mobisec_omniip_core_NativeEngine_setPremiumUnlockedNative(
     }
 }
 
+extern "C" __attribute__ ((visibility ("default"))) JNIEXPORT void JNICALL
+Java_com_mobisec_omniip_core_NativeEngine_setShizukuPrivileges(
+        JNIEnv* env,
+        jobject /* this */,
+        jboolean isGranted) {
+    g_shizuku_privileged.store(isGranted);
+    if (isGranted) {
+        __android_log_print(ANDROID_LOG_INFO, "OmniIP-Shizuku", "NDK Layer has been granted Shizuku root/shell privileges.");
+    } else {
+        __android_log_print(ANDROID_LOG_INFO, "OmniIP-Shizuku", "NDK Layer Shizuku privileges revoked.");
+    }
+}
+
+extern "C" __attribute__ ((visibility ("default"))) JNIEXPORT void JNICALL
+Java_com_mobisec_omniip_core_NativeEngine_setRawIcmpSocket(
+        JNIEnv* env,
+        jobject /* this */,
+        jint fd) {
+    g_raw_icmp_fd.store(fd);
+    __android_log_print(ANDROID_LOG_INFO, "OmniIP-Shizuku", "Raw ICMP socket FD configured: %d", fd);
+}
+
+#include <linux/netlink.h>
+#include <linux/inet_diag.h>
+#include <linux/sock_diag.h>
+#include <sys/socket.h>
+
+extern "C" int resolveUidViaNetlink(struct inet_diag_req_v2* req) {
+    if (!g_shizuku_privileged.load()) return -1;
+
+    int nl_sock = socket(AF_NETLINK, SOCK_RAW, NETLINK_INET_DIAG);
+    if (nl_sock < 0) return -1;
+
+    struct sockaddr_nl nladdr;
+    memset(&nladdr, 0, sizeof(nladdr));
+    nladdr.nl_family = AF_NETLINK;
+
+    struct {
+        struct nlmsghdr nlh;
+        struct inet_diag_req_v2 r;
+    } req_msg;
+
+    memset(&req_msg, 0, sizeof(req_msg));
+    req_msg.nlh.nlmsg_len = sizeof(req_msg);
+    req_msg.nlh.nlmsg_type = SOCK_DIAG_BY_FAMILY;
+    req_msg.nlh.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
+    req_msg.r = *req;
+
+    if (sendto(nl_sock, &req_msg, sizeof(req_msg), 0, (struct sockaddr*)&nladdr, sizeof(nladdr)) < 0) {
+        close(nl_sock);
+        return -1;
+    }
+
+    char buf[8192];
+    struct iovec iov = { buf, sizeof(buf) };
+    struct sockaddr_nl rnladdr;
+    struct msghdr msg = { &rnladdr, sizeof(rnladdr), &iov, 1, NULL, 0, 0 };
+
+    int uid = -1;
+    while (1) {
+        int len = recvmsg(nl_sock, &msg, 0);
+        if (len <= 0) break;
+
+        struct nlmsghdr* h = (struct nlmsghdr*)buf;
+        while (NLMSG_OK(h, len)) {
+            if (h->nlmsg_type == NLMSG_DONE) {
+                close(nl_sock);
+                return uid;
+            }
+            if (h->nlmsg_type == NLMSG_ERROR) {
+                close(nl_sock);
+                return -1;
+            }
+
+            struct inet_diag_msg* diag_msg = (struct inet_diag_msg*)NLMSG_DATA(h);
+            // Assuming the request matches, just return the UID of the first matching entry
+            uid = diag_msg->idiag_uid;
+            close(nl_sock);
+            return uid;
+            h = NLMSG_NEXT(h, len);
+        }
+    }
+    close(nl_sock);
+    return uid;
+}
+
 #include <thread>
 #include <chrono>
 
@@ -793,6 +883,12 @@ Java_com_mobisec_omniip_core_NativeEngine_processPacketNative(
 
     if (length < sizeof(IPv4Header)) {
         return 0; // DROP
+    }
+
+    // Safety validation for Raw ICMP FD when Shizuku is disabled
+    if (!g_shizuku_privileged.load() && g_raw_icmp_fd.load() != -1) {
+        __android_log_print(ANDROID_LOG_WARN, "OmniIP-Shizuku", "Shizuku Privileges revoked, clearing raw ICMP FD.");
+        g_raw_icmp_fd.store(-1);
     }
 
     const uint8_t* rawData = static_cast<const uint8_t*>(bufferPtr);

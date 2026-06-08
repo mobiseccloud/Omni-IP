@@ -67,7 +67,7 @@ class NetworkStatsViewModel(application: Application) : AndroidViewModel(applica
                 }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.e("NetworkStatsViewModel", "Error reading /proc/net/dev", e)
         }
 
         // Fallback to TrafficStats if /proc/net/dev fails or is empty
