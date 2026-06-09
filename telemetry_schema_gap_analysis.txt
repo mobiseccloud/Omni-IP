@@ -1,0 +1,24 @@
+Telemetry Schema Gap Analysis:
+
+1. `ConnectionLog` (in `com.mobisec.omniip.db.ConnectionLog`)
+   - `destPort: Int` (Non-nullable)
+   - `sourcePort: Int?` (Nullable)
+   Issue: `destPort` is strictly non-nullable. Protocols like ICMP, ESP, GRE do not have a concept of destination ports. Attempting to save them could result in meaningless data (e.g. defaulting to 0) or schema exceptions if a system tries to parse them when null is more semantically accurate.
+
+2. `ConnectionTelemetry` (in `com.mobisec.omniip.model.ConnectionTelemetry`)
+   - `sourcePort: Int` (Non-nullable)
+   - `destPort: Int` (Non-nullable)
+   Issue: `sourcePort` and `destPort` are both non-nullable Integers. For 145-protocol support, if a protocol does not use ports, placing 0 may misrepresent the data (since port 0 is a valid, albeit rare, network port).
+
+3. `NativeEngine.onTelemetryEvent`
+   - Native bridge signature `(ILjava/lang/String;IIII)V` (`sourcePort`, `destIp`, `destPort`, `protocol`, `txBytes`, `rxBytes`) assumes `sourcePort` and `destPort` are always provided as `Int`.
+   Issue: Primitive `Int` in JNI/Kotlin cannot be null. This forces a placeholder value (like 0 or -1) to be sent from the native layer for port-less protocols.
+
+4. `OmniVpnService.kt`
+   - `resolveUid(protocol, sourceIp, sourcePort, destIp, destPort)` explicitly returns early if protocol is not 6 or 17. Port-less protocols therefore cannot accurately map app attribution (UID) without relying solely on IPs or bypassing UID mapping, missing contextual EDR data.
+
+Plan for 145-Protocol Support:
+- Update `ConnectionLog` to make `destPort` nullable (`Int?`).
+- Update `ConnectionTelemetry` to make `sourcePort` and `destPort` nullable (`Int?`).
+- Update `onTelemetryEvent` and related JNI callbacks to use negative values (e.g., `-1`) as an indicator of "no port applicable" for non-TCP/UDP protocols, and translate this to `null` before inserting into Room/StateFlows.
+- Remove hardcoded protocol checks in `resolveUid` and adapt mapping so it gracefully handles `-1` ports when attributing traffic.

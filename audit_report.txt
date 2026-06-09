@@ -1,0 +1,56 @@
+MASTER FORENSIC AUDIT DIRECTIVE: PROTOCOL SPECTRUM & PCAP INTEGRITY
+===================================================================
+
+Protocol Hardcoding Map
+-----------------------
+- bridge.cpp
+  Line 922: if (protocol == 6 || protocol == 17) { // TCP or UDP
+  Line 969: if (protocol == 6 || protocol == 17) { // TCP or UDP
+  Line 980: if (protocol == 17 && dest_port == 53) {
+- edr_proxy.cpp
+  Line 359: if (len >= ihl + 8 && (protocol == 6 || protocol == 17)) {
+  Line 366: if (protocol == 6 && src_port == PROXY_TCP_PORT) {
+  Line 372: } else if (protocol == 17 && src_port == PROXY_UDP_PORT) {
+  Line 394: if (protocol == 6) {
+  Line 408: } else if (protocol == 17) {
+  Line 623: if (protocol == 6) {
+  Line 682: } else if (protocol == 17) {
+- OmniVpnService.kt
+  Line 413: if (protocol == 6 || protocol == 17) {
+  Line 692: if (isBlocked && data.protocol == 6) {
+  Line 856: if (protocol == 17 || protocol == 6) {
+  Line 886: if (protocol == 6 && PacketUtils.isTcpSyn(packet, ihl)) {
+  Line 906: if (protocol == 17 && destPort == 53) {
+  Line 926: if (protocol == 6 && destPort == 443) {
+  Line 976: val isTcpSyn = protocol == 6 && direction == ConnectionDirection.OUTBOUND_STR
+  Line 1157: if (protocol != 6 && protocol != 17) {
+
+Telemetry Schema Gap Analysis
+-----------------------------
+1. ConnectionLog (com.mobisec.omniip.db.ConnectionLog): destPort is non-nullable (Int). sourcePort is nullable (Int?).
+2. ConnectionTelemetry (com.mobisec.omniip.model.ConnectionTelemetry): sourcePort and destPort are non-nullable (Int).
+3. JNI Bridge (NativeEngine.onTelemetryEvent): Hardcoded primitive 'Int' arguments force port-less protocols to provide fake ports.
+4. UID Resolution (OmniVpnService.resolveUid): Rejects mapping for non-TCP/UDP traffic, leaving telemetry without process attribution.
+To support 145-protocols, all port fields must become nullable (Int?), and the JNI bridge must send a sentinel value (like -1) for portless protocols, which Kotlin translates to null.
+
+PCAP Failure Hypothesis
+-----------------------
+1. Lifecycle Disconnect: OmniVpnService initializes PcapWriter but hardcodes '-1' as the pcapFd argument when calling `NativeEngine.processPacketNative(packet, length, -1)`. The C++ code checks `if (pcapFd != -1)` before writing, thus ignoring the packet.
+2. File Descriptor Leak: The Kotlin side opens the ParcelFileDescriptor but fails to provide it to the interception loop. PcapWriter implements a Channel to write packets async, but `writePacket` is never called.
+3. Header Malformation Check: PcapWriter successfully writes the 24-byte global libpcap header, but since C++ never receives the fd, no 16-byte packet headers or data are ever appended. The resulting file only contains the 24-byte global header and 0 captured packets.
+
+Remediation Blueprint
+---------------------
+1. Expand telemetry to support 145-protocols:
+   - Make destPort nullable in `ConnectionLog`, and both source/dest ports nullable in `ConnectionTelemetry`.
+   - Update `edr_emit_telemetry` to pass -1 for non-TCP/UDP protocols, and translate -1 to null in Kotlin before insertion.
+   - Broaden `resolveUid` to not return early when `protocol != 6 && protocol != 17`.
+
+2. Fix the PCAP writer initialization:
+   - Dynamically fetch the FD in OmniVpnService: `val pcapFd = PcapWriter.Companion.activePcapWriter?.getFd() ?: -1`.
+   - Pass this FD to `NativeEngine.processPacketNative(packet, length, pcapFd)`.
+   - Rely entirely on the C++ layer to write the packet headers and payloads to the FD directly for zero-allocation performance, retaining PcapWriter only for writing the initial 24-byte global header and managing the file lifecycle.
+
+3. Generalize packet-parsing:
+   - Separate L3 IP parsing from L4 TCP/UDP parsing in `bridge.cpp` and `edr_proxy.cpp`.
+   - Implement "Transparent Forwarder" mode for non-TCP/UDP traffic, forwarding raw packets over the VPN interface without NAT/proxy logic.

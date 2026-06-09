@@ -1,0 +1,19 @@
+Remediation Blueprint:
+
+1. Expand telemetry to support the full IANA protocol spectrum:
+   - Database/Data Model: Refactor `ConnectionLog` and `ConnectionTelemetry` to make `sourcePort` and `destPort` nullable integers (`Int?`).
+   - Native C++: Modify `edr_emit_telemetry` and the JNI call to pass `-1` for missing ports when protocol is not TCP (6) or UDP (17).
+   - Kotlin: Update `OmniVpnService.onTelemetryEvent` to map `-1` to `null` before creating `ConnectionTelemetry` and inserting into the database. Update `resolveUid` to accept `-1` and handle it properly without early returning on unsupported protocols.
+
+2. Fix the PCAP writer initialization and header construction:
+   - In `OmniVpnService.kt`, fetch the actual file descriptor from `activePcapWriter`:
+     `val pcapFd = PcapWriter.Companion.activePcapWriter?.getFd() ?: -1`
+   - Pass this `pcapFd` to `NativeEngine.processPacketNative(packet, length, pcapFd)`.
+   - The global header written by `PcapWriter.initialize` is correct. The C++ packet header writing logic in `bridge.cpp` is also correct but was starved of the fd. Fixing the fd parameter will bridge the gap.
+   - Alternatively, deprecate `PcapWriter`'s packet channel entirely since native C++ will write directly to the fd, ensuring zero-copy and accurate timestamps, leaving `PcapWriter` only responsible for the global header and file lifecycle.
+
+3. Generalize packet-parsing to remove port-dependency assumptions:
+   - In `edr_proxy.cpp`, rewrite the packet inspection loop to dynamically process the `protocol` field.
+   - Separate L4 parsing (TCP/UDP) from L3 processing (IP). If a packet is TCP/UDP, parse the ports and apply proxy translation.
+   - If a packet is ICMP, GRE, ESP, or any other protocol, switch `edr_proxy.cpp` from a "Filtering Proxy" to a "Transparent Forwarder" (especially in Shizuku-Enabled mode). This means skipping NAT/port modifications and forwarding the raw L3 packet through the VPN interface and logging it via `edr_emit_telemetry(..., -1, -1, protocol, ...)`.
+   - Remove early exits in `bridge.cpp` that filter exclusively for `protocol == 6 || protocol == 17`.
