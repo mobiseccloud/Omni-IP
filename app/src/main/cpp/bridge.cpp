@@ -881,6 +881,22 @@ Java_com_mobisec_omniip_core_NativeEngine_processPacketNative(
     }
 
 
+    if (pcapFd != -1) {
+        // Write PCAP packet header and data directly
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+
+        uint32_t header[4];
+        header[0] = tv.tv_sec;
+        header[1] = tv.tv_usec;
+        header[2] = length;
+        header[3] = length;
+
+        // Write header and data sequentially
+        write(pcapFd, header, 16);
+        write(pcapFd, bufferPtr, length);
+    }
+
     if (length < sizeof(IPv4Header)) {
         return 0; // DROP
     }
@@ -966,13 +982,9 @@ Java_com_mobisec_omniip_core_NativeEngine_processPacketNative(
     // The previous implementation was mathematically flawed and dropped almost all traffic due to false positives.
 
     // Step 4: Integrate verification checks (Unauthorized deep scan pattern)
-    if (protocol == 6 || protocol == 17) { // TCP or UDP
-        if (length >= header_len + sizeof(TCPUDPHeader)) {
-            if (dest_port == 0) {
-                if ((g_auth_state & FLAG_PREMIUM) == 0 && (g_auth_state & FLAG_DEBUG) == 0) {
-                     return 0; // DROP
-                }
-            }
+    if (dest_port == 0 && (protocol == 6 || protocol == 17)) {
+        if ((g_auth_state & FLAG_PREMIUM) == 0 && (g_auth_state & FLAG_DEBUG) == 0) {
+             return 0; // DROP
         }
     }
 
