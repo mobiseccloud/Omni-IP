@@ -329,23 +329,34 @@ class OmniVpnService : VpnService() {
         if (vpnInterface != null) return START_STICKY
 
         try {
+            val prepareIntent = android.net.VpnService.prepare(this)
+            if (prepareIntent != null) {
+                android.util.Log.w(TAG, "VPN preparation not granted by user. Shutting down service.")
+                isServiceRunning.value = false
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+                return START_NOT_STICKY
+            }
+
             val builder = Builder()
                 .addAddress("10.0.0.2", 24)
                 .addRoute("0.0.0.0", 0)
                 .addAddress("fd00:1:fd00:1:fd00:1:fd00:1", 128)
                 .addRoute("::", 0)
+                .addDnsServer("10.0.0.2")
                 .addDisallowedApplication(packageName)
                 .setSession("Omni-IP Telemetry Engine")
                 .setMtu(1500)
 
             vpnInterface = builder.establish()
             if (vpnInterface == null) {
-                android.util.Log.w(TAG, "VPN preparation not granted. Shutting down service.")
+                android.util.Log.w(TAG, "VPN establish failed (returned null). Shutting down service.")
                 isServiceRunning.value = false
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
                 return START_NOT_STICKY
             }
+
         } catch (e: SecurityException) {
             android.util.Log.e(TAG, "SecurityException establishing VPN. Permission revoked?", e)
             isServiceRunning.value = false

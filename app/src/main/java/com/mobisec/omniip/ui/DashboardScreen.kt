@@ -7,6 +7,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.collectAsState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Add
@@ -37,6 +39,8 @@ import com.mobisec.omniip.vpn.OmniVpnService
 import com.mobisec.omniip.viewmodel.DashboardViewModel
 import com.mobisec.omniip.viewmodel.TelemetryViewModel
 import com.mobisec.omniip.ui.theme.TextSecondary
+import com.mobisec.omniip.core.ShizukuStateProvider
+import com.mobisec.omniip.core.ShizukuStatus
 import com.mobisec.omniip.ui.theme.SurfaceLevel1
 import com.mobisec.omniip.model.ConnectionDirection
 import java.text.SimpleDateFormat
@@ -181,8 +185,46 @@ fun DashboardScreen(
         ), label = "pulse"
     )
 
+    val shizukuStatus by ShizukuStateProvider.shizukuStatus.collectAsState()
+
     Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
         
+        // Shizuku Status Pill
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val (statusText, statusColor, action) = when (shizukuStatus) {
+                ShizukuStatus.GRANTED -> Triple("SHIZUKU: ACTIVE", MatrixGreen, null)
+                ShizukuStatus.PENDING_PERMISSION -> Triple("SHIZUKU: PENDING", TacticalAmber, { ShizukuStateProvider.requestPermission() })
+                ShizukuStatus.UNAVAILABLE -> Triple("SHIZUKU: INACTIVE", AlertRed, null)
+            }
+
+            Card(
+                modifier = Modifier.clickable(enabled = action != null) { action?.invoke() },
+                colors = CardDefaults.cardColors(containerColor = SurfaceLevel1)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(statusColor, shape = androidx.compose.foundation.shape.CircleShape)
+                    )
+                    Text(
+                        text = statusText,
+                        color = statusColor,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
         Spacer(modifier = Modifier.height(16.dp))
 
         Row(modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
