@@ -149,7 +149,7 @@ fun DeviceActionBottomSheet(
             Text(text = "Target Actions: ${device.ipAddress}", fontWeight = FontWeight.Bold, fontSize = 20.sp, color = MaterialTheme.colorScheme.onSurface)
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("MAC: ${device.macAddress}", color = Color.Gray, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                Text("MAC: ${device.macAddress}", color = TextSecondary, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
             }
 
             HorizontalDivider(color = TextSecondary, thickness = 1.dp)
