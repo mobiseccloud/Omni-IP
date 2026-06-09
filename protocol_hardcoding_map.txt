@@ -1,0 +1,25 @@
+Protocol Hardcoding Map:
+
+./app/src/main/cpp/bridge.cpp:
+Line 922: if (protocol == 6 || protocol == 17) { // TCP or UDP
+Line 969: if (protocol == 6 || protocol == 17) { // TCP or UDP
+Line 980: if (protocol == 17 && dest_port == 53) {
+
+./app/src/main/cpp/edr_proxy.cpp:
+Line 359: if (len >= ihl + 8 && (protocol == 6 || protocol == 17)) {
+Line 366: if (protocol == 6 && src_port == PROXY_TCP_PORT) {
+Line 372: } else if (protocol == 17 && src_port == PROXY_UDP_PORT) {
+Line 394: if (protocol == 6) {
+Line 408: } else if (protocol == 17) {
+Line 623: if (protocol == 6) {
+Line 682: } else if (protocol == 17) {
+
+./app/src/main/java/com/mobisec/omniip/vpn/OmniVpnService.kt:
+Line 413: if (protocol == 6 || protocol == 17) {
+Line 692: if (isBlocked && data.protocol == 6) {
+Line 856: if (protocol == 17 || protocol == 6) {
+Line 886: if (protocol == 6 && PacketUtils.isTcpSyn(packet, ihl)) {
+Line 906: if (protocol == 17 && destPort == 53) {
+Line 926: if (protocol == 6 && destPort == 443) {
+Line 976: val isTcpSyn = protocol == 6 && direction == ConnectionDirection.OUTBOUND_STR
+Line 1157: if (protocol != 6 && protocol != 17) {

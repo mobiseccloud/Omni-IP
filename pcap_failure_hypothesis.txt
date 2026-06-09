@@ -1,0 +1,12 @@
+PCAP Failure Hypothesis:
+
+1. Lifecycle & Integration Mismatch:
+In `OmniVpnService.kt`, the PCAP recording is triggered, and a `PcapWriter` is initialized with a `ParcelFileDescriptor`. However, in the critical packet interception loop, the JNI call is made as follows:
+`val actionCode = com.mobisec.omniip.core.NativeEngine.processPacketNative(packet, length, -1)`
+The `pcapFd` argument is hardcoded to `-1`, meaning the C++ native layer is never given the actual file descriptor to write to. Because of this, the PCAP write logic inside `processPacketNative` (`if (pcapFd != -1) { write(pcapFd, ...); }`) is entirely skipped.
+
+2. IO/Permission vs File Descriptor Leakage:
+The `ParcelFileDescriptor` is opened with `MODE_READ_WRITE | MODE_CREATE | MODE_TRUNCATE` which is correct, but since it is never passed to `processPacketNative`, nothing is written by the native side. Concurrently, `PcapWriter` itself spins up a `Channel` and a Coroutine to write packets asynchronously, but it seems there's no code hooking the intercepted packets to `PcapWriter.writePacket(...)`. The native layer drops the ball because it receives `-1`, and the Kotlin layer drops the ball because it never calls `writePacket`.
+
+3. Header Malformation:
+`PcapWriter` correctly writes the Global PCAP Header (magic number, version, snaplen, etc.). However, if the native layer were to actually write using `pcapFd`, it only writes the *Packet Header* (timestamp and length) and the raw data. Since `bridge.cpp` uses `write(pcapFd, header, 16)`, it relies on the Kotlin layer having already written the 24-byte global header. If `processPacketNative` was given the fd, the file would correctly start with the 24-byte global header (from Kotlin) followed by 16-byte packet headers and payloads (from C++). But because it's passed `-1`, only the 24-byte global header is ever written, leading to an empty capture file or a "0 packets captured" scenario.
